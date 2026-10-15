@@ -7,6 +7,8 @@ import hashlib
 from pathlib import Path
 from zipfile import BadZipFile, ZipFile
 
+from inspect_firmware_partition import parse_images
+
 
 def sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
@@ -31,7 +33,10 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--ipsw", type=Path, required=True, help="official Apple IPSW ZIP file")
     parser.add_argument("--backup", type=Path, required=True, help="read-only firmware-partition backup image")
+    parser.add_argument("--sector-size", type=int, default=2048, help="logical sector size (default: 2048)")
     args = parser.parse_args()
+    if args.sector_size <= 0:
+        parser.error("--sector-size must be positive")
 
     try:
         with ZipFile(args.ipsw) as ipsw:
@@ -65,6 +70,35 @@ def main() -> int:
         nonzero = sum(byte != 0 for byte in tail)
         non_ff = sum(byte != 0xFF for byte in tail)
         print(f"Partition bytes beyond IPSW payload: {len(tail):,}; nonzero {nonzero:,}; non-0xFF {non_ff:,}")
+
+    try:
+        _, ipsw_entries = parse_images(payload, args.sector_size)
+        _, backup_entries = parse_images(backup, args.sector_size)
+    except ValueError as exc:
+        parser.error(f"Cannot parse firmware image directory: {exc}")
+    backup_by_type = {str(entry["type"]): entry for entry in backup_entries}
+    print("Component comparison:")
+    for image in ipsw_entries:
+        image_type = str(image["type"])
+        other = backup_by_type.get(image_type)
+        if other is None:
+            print(f"  {image_type}: absent from device backup")
+            continue
+        if not image["range_valid"] or not other["range_valid"]:
+            print(f"  {image_type}: invalid bounds; not compared")
+            continue
+        image_start = int(image["image_start"])
+        other_start = int(other["image_start"])
+        length = int(image["length"])
+        other_length = int(other["length"])
+        if length != other_length:
+            print(f"  {image_type}: size differs (IPSW {length:,}, backup {other_length:,})")
+            continue
+        image_bytes = payload[image_start:image_start + length]
+        other_bytes = backup[other_start:other_start + other_length]
+        same = image_bytes == other_bytes
+        print(f"  {image_type}: {'IDENTICAL' if same else 'DIFFERENT'}, {length:,} bytes, "
+              f"IPSW SHA-256 {sha256(image_bytes)}, backup SHA-256 {sha256(other_bytes)}")
     return 0
 
 

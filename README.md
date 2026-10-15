@@ -85,7 +85,9 @@ Some USB bridges report a 2048-byte logical sector size for this iPod. The reade
 
 The official Apple restore package `firmware/iPod_25.1.3.ipsw` is already downloaded and verified separately. It is a clean restore image, not a read-back of the copy currently installed on the device.
 
-The raw backup is a read-only recovery original. Do not use it as an output path or modify it; all future patch builds will start from the separate IPSW and write a new image to a new path. The analysis commands only read the backup.
+The raw backup is a read-only recovery original. Do not use it as an output path or modify it. Any future build must start from a separate copy of the full device backup, preserve data outside the IPSW payload, and write to a new output path. The analysis commands only read the backup.
+
+The read-back partition has been compared with the IPSW component by component. OSOS, RSRC, and AUPD match the official payload byte for byte. The 35 differences in the first 13,905,920 bytes are confined to firmware-directory metadata at offsets `0x4224`–`0x42c8`; the partition also contains additional data after the IPSW payload. Keep the full device backup as the recovery source and do not replace it with the smaller IPSW payload.
 
 To inspect the image directory in the local backup and compare it with the IPSW payload, run:
 
@@ -102,3 +104,7 @@ python .\tools\compare_firmware_backup.py --ipsw .\firmware\iPod_25.1.3.ipsw --b
 ```
 
 Firmware images and device backups stay under `firmware/`, which Git ignores; only source code and documentation belong in the public repository.
+
+## What is ready
+
+The project currently contains the UI concept, read-only backup and firmware inspection tools, and a component-level comparison of the stock device backup against Apple's IPSW. The visual is a mockup only. No crossfade code has been inserted into RetailOS, and there is no installable firmware image yet: the music PCM mixing point and the stock menu/settings integration have not been identified and validated.
