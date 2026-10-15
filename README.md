@@ -38,3 +38,19 @@ The script opens the physical disk read-only, verifies the iPod partition layout
 Some USB bridges report a 2048-byte logical sector size for this iPod. The reader obtains that size from Windows and aligns raw reads accordingly. It determines whether the MBR partition addresses use 512-byte or device-sized units by matching both the data partition offset and size against Windows before reading. The backup file contains only the exact byte range of the firmware partition.
 
 The official Apple restore package `firmware/iPod_25.1.3.ipsw` is already downloaded and verified separately. It is a clean restore image, not a read-back of the copy currently installed on the device.
+
+To inspect the image directory in the local backup and compare it with the IPSW payload, run:
+
+```powershell
+python .\tools\inspect_firmware_partition.py --image .\firmware\ipod_video_5.5g_30gb_stock_partition1.img --ipsw .\firmware\iPod_25.1.3.ipsw --sector-size 2048
+```
+
+This checks each directory entry's bounds and reports whether the stored checksum field matches a simple byte sum; the field may use a different meaning for some image types.
+
+To compare the raw bytes of the backup and IPSW payload without extracting either file, run:
+
+```powershell
+python .\tools\compare_firmware_backup.py --ipsw .\firmware\iPod_25.1.3.ipsw --backup .\firmware\ipod_video_5.5g_30gb_stock_partition1.img
+```
+
+Firmware images and device backups stay under `firmware/`, which Git ignores; only source code and documentation belong in the public repository.
