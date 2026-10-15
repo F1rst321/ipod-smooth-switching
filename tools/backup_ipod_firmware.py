@@ -154,12 +154,6 @@ def main() -> int:
         if not data or data["type"] not in FAT32_TYPES:
             raise BackupError("MBR entry 2 is not a FAT32 iPod data partition; refusing to read")
 
-        # MBR partition LBAs are in 512-byte units, even when a USB bridge
-        # advertises a larger logical I/O sector. read_at handles alignment.
-        volume_offset = firmware["start_sector"] * SECTOR_SIZE
-        volume_size = firmware["sector_count"] * SECTOR_SIZE
-        data_offset = data["start_sector"] * SECTOR_SIZE
-        data_size = data["sector_count"] * SECTOR_SIZE
         try:
             import subprocess
             ps = subprocess.run(
@@ -170,14 +164,38 @@ def main() -> int:
             values = [int(line.strip()) for line in ps.stdout.splitlines() if line.strip()]
         except Exception as exc:
             raise BackupError(f"Could not cross-check drive {drive}: against Windows partition data: {exc}") from exc
-        if len(values) < 2 or values[0] != data_offset or values[1] != data_size:
+        if len(values) < 2:
+            raise BackupError(f"Windows returned incomplete partition data for drive {drive}:")
+
+        # MBR LBA units are normally 512 bytes, but some iPod USB bridges
+        # expose partition LBAs in the device's larger logical-sector units.
+        # Accept a convention only when both offset and size match Windows.
+        lba_units = sorted({SECTOR_SIZE, logical_sector_size})
+        matching_units = [
+            unit for unit in lba_units
+            if data["start_sector"] * unit == values[0]
+            and data["sector_count"] * unit == values[1]
+        ]
+        if not matching_units:
             raise BackupError(
-                f"Drive {drive}: does not match PhysicalDrive{args.disk_number}'s FAT32 partition; refusing to read"
+                f"Drive {drive}: does not match PhysicalDrive{args.disk_number}'s FAT32 partition; refusing to read. "
+                f"Windows reports offset {values[0]:,}, size {values[1]:,}; MBR values imply "
+                + ", ".join(
+                    f"offset {data['start_sector'] * unit:,}, size {data['sector_count'] * unit:,} "
+                    f"with {unit}-byte LBA units"
+                    for unit in lba_units
+                )
             )
+        lba_unit_size = matching_units[0]
+        volume_offset = firmware["start_sector"] * lba_unit_size
+        volume_size = firmware["sector_count"] * lba_unit_size
+        data_offset = data["start_sector"] * lba_unit_size
+        data_size = data["sector_count"] * lba_unit_size
 
         print(f"Verified iPod-style MBR on PhysicalDrive{args.disk_number}")
         print(f"Firmware partition: offset {volume_offset:,}, size {volume_size:,} bytes")
         print(f"Logical sector size: {logical_sector_size} bytes")
+        print(f"MBR LBA unit size: {lba_unit_size} bytes (matched against Windows)")
         print(f"Data partition: {drive}: offset {data_offset:,}, size {data_size:,} bytes (cross-check OK)")
         print("Reading firmware partition only; opening the device read-only.")
 
