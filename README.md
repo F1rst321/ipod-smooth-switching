@@ -46,6 +46,13 @@ Check that known RetailOS 1.3 UI hook signatures still match the input image:
 python .\tools\check_research_hooks.py .\firmware\iPod_25.1.3.ipsw
 ```
 
+For ARM disassembly, install the optional analyzer dependency once in the project interpreter:
+
+```powershell
+python -m pip install -r .\requirements-analysis.txt
+python .\tools\disassemble_arm.py .\firmware\iPod_25.1.3.ipsw --start 0x21f254 --count 64
+```
+
 ## Backup of the firmware currently on the iPod
 
 Windows restricts raw-disk access to an elevated PowerShell session. In PowerShell opened **as Administrator**, run this from the project directory (confirm the disk number and drive letter first):
@@ -59,6 +66,8 @@ The script opens the physical disk read-only, verifies the iPod partition layout
 Some USB bridges report a 2048-byte logical sector size for this iPod. The reader obtains that size from Windows and aligns raw reads accordingly. It determines whether the MBR partition addresses use 512-byte or device-sized units by matching both the data partition offset and size against Windows before reading. The backup file contains only the exact byte range of the firmware partition.
 
 The official Apple restore package `firmware/iPod_25.1.3.ipsw` is already downloaded and verified separately. It is a clean restore image, not a read-back of the copy currently installed on the device.
+
+The raw backup is a read-only recovery original. Do not use it as an output path or modify it; all future patch builds will start from the separate IPSW and write a new image to a new path. The analysis commands only read the backup.
 
 To inspect the image directory in the local backup and compare it with the IPSW payload, run:
 
