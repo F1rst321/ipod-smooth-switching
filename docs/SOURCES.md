@@ -1,6 +1,7 @@
 # Источники для разбора
 
 - [Rockbox `ipodpatcher.c`](https://github.com/mguentner/rockbox/blob/master/rbutil/ipodpatcher/ipodpatcher.c) — открытая реализация чтения таблицы и размещения образов прошивки iPod.
+- [Rockbox `pcm-pp.c`](https://github.com/Rockbox/rockbox/blob/master/firmware/target/arm/pp/pcm-pp.c) и [`pp5020.h`](https://github.com/Rockbox/rockbox/blob/master/firmware/export/pp5020.h) — первичные открытые исходники драйверов PP502x; использованы для сверки адресов I²S и DMA и аппаратного формата PCM, но код Rockbox не включён в патч.
 - [iPod Classic Firmware Research](https://github.com/giek2000/ipod-classic-firmware-research) — содержит отдельную спецификацию для RetailOS 25.1.3 и документацию по MeCCA. Это независимый сторонний разбор; перед использованием адреса сопоставляются с локальным компонентом OSOS, а описание аудиопути для других моделей не считается доказанным для нашего 5.5G.
 - [Спецификация RetailOS 25.1.3](https://github.com/giek2000/ipod-classic-firmware-research/blob/main/specs/iPod_5_5G_Video_Enhanced_25_1_3.md) — полезна как индекс строк и гипотез. Указанный в ней бинарник отличается по размеру и SHA-256 от локально извлечённого OSOS, поэтому её адреса нельзя напрямую применять к патчеру.
 - [Исследование RetailOS в эмуляторе iPod](https://github.com/siggifly/ipod-emulator) — публикует разбор PCM-задачи и двойного аудиобуфера. Участок `OSOS+0x25a720` был независимо просмотрен и дизассемблирован на локальном бинарнике; роль его callback ещё исследуется.

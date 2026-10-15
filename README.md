@@ -23,42 +23,50 @@ The device-reported version is 1.3. The matching late-2006 30 GB firmware family
 
 ## Usage
 
-Run `python tools/inspect_ipsw.py path\to\iPod_25.1.3.ipsw` to list package entries and print the package SHA-1.
+Run `py tools/inspect_ipsw.py path\to\iPod_25.1.3.ipsw` to list package entries and print the package SHA-1.
 
 Extract OSOS and RSRC to a new directory (the firmware files are ignored by Git):
 
 ```powershell
-python .\tools\extract_firmware_images.py .\firmware\iPod_25.1.3.ipsw --output-dir .\firmware\extracted\official
+py .\tools\extract_firmware_images.py .\firmware\iPod_25.1.3.ipsw --output-dir .\firmware\extracted\official
 ```
 
 The extractor refuses to overwrite an existing output directory and records source/component hashes in `manifest.json`. Search a component directly from IPSW without creating an extracted binary:
 
 ```powershell
-python .\tools\find_firmware_strings.py .\firmware\iPod_25.1.3.ipsw --type OSOS --contains audio
-python .\tools\find_firmware_strings.py .\firmware\iPod_25.1.3.ipsw --type RSRC --contains settings
+py .\tools\find_firmware_strings.py .\firmware\iPod_25.1.3.ipsw --type OSOS --contains audio
+py .\tools\find_firmware_strings.py .\firmware\iPod_25.1.3.ipsw --type RSRC --contains settings
 ```
 
 See [`docs/RESEARCH_STATUS.md`](docs/RESEARCH_STATUS.md) for current findings and the reverse-engineering sequence.
+
+For a host-side demonstration of the mixing algorithm, use two uncompressed 16-bit WAV files with the same sample rate and channel count:
+
+```powershell
+py .\tools\crossfade_preview.py .\first.wav .\second.wav .\crossfade.wav --seconds 5
+```
+
+This creates a linear crossfade of 3–10 seconds without modifying either input. It runs on the computer and is not an iPod firmware patch. The ARM I²S and DMA literal references in the exact OSOS image can be reproduced with `tools/find_arm_literal_references.py`; see [`docs/AUDIO_PATH.md`](docs/AUDIO_PATH.md).
 
 The requested click-wheel settings screen is documented in [`docs/UI_CONCEPT.md`](docs/UI_CONCEPT.md); the visual mockup is [`docs/mockups/crossfade-wheel-settings.png`](docs/mockups/crossfade-wheel-settings.png). It is a design preview, not a firmware screenshot.
 
 Check that known RetailOS 1.3 UI hook signatures still match the input image:
 
 ```powershell
-python .\tools\check_research_hooks.py .\firmware\iPod_25.1.3.ipsw
+py .\tools\check_research_hooks.py .\firmware\iPod_25.1.3.ipsw
 ```
 
 For ARM disassembly, install the optional analyzer dependency once in the project interpreter:
 
 ```powershell
-python -m pip install -r .\requirements-analysis.txt
-python .\tools\disassemble_arm.py .\firmware\iPod_25.1.3.ipsw --start 0x21f254 --count 64
+py -m pip install -r .\requirements-analysis.txt
+py .\tools\disassemble_arm.py .\firmware\iPod_25.1.3.ipsw --start 0x21f254 --count 64
 ```
 
 To locate direct ARM `BL` callers of a byte offset in OSOS, use the read-only helper:
 
 ```powershell
-python .\tools\find_arm_callers.py .\firmware\iPod_25.1.3.ipsw --target 0x25a614
+py .\tools\find_arm_callers.py .\firmware\iPod_25.1.3.ipsw --target 0x25a614
 ```
 
 It does not find Thumb or indirect calls, and every match must be checked in context before being treated as a code reference.
@@ -66,7 +74,7 @@ It does not find Thumb or indirect calls, and every match must be checked in con
 To search for aligned absolute 32-bit pointers to an OSOS string or function, use:
 
 ```powershell
-python .\tools\find_pointer_references.py .\firmware\iPod_25.1.3.ipsw --target 0x213e10
+py .\tools\find_pointer_references.py .\firmware\iPod_25.1.3.ipsw --target 0x213e10
 ```
 
 This is a narrow scan; a lack of matches does not mean the target is unused. PC-relative, Thumb, and computed references require other analysis.
@@ -76,7 +84,7 @@ This is a narrow scan; a lack of matches does not mean the target is unused. PC-
 Windows restricts raw-disk access to an elevated PowerShell session. In PowerShell opened **as Administrator**, run this from the project directory (confirm the disk number and drive letter first):
 
 ```powershell
-python .\tools\backup_ipod_firmware.py --disk-number 1 --data-drive E --output .\firmware\ipod_video_5.5g_30gb_stock_partition1.img
+py .\tools\backup_ipod_firmware.py --disk-number 1 --data-drive E --output .\firmware\ipod_video_5.5g_30gb_stock_partition1.img
 ```
 
 The script opens the physical disk read-only, verifies the iPod partition layout, cross-checks its FAT32 data partition against the selected drive letter, and refuses to overwrite an existing backup. It writes a raw image of the iPod firmware partition plus a JSON manifest with its SHA-256 hash.
@@ -92,7 +100,7 @@ The read-back partition has been compared with the IPSW component by component. 
 To inspect the image directory in the local backup and compare it with the IPSW payload, run:
 
 ```powershell
-python .\tools\inspect_firmware_partition.py --image .\firmware\ipod_video_5.5g_30gb_stock_partition1.img --ipsw .\firmware\iPod_25.1.3.ipsw --sector-size 2048
+py .\tools\inspect_firmware_partition.py --image .\firmware\ipod_video_5.5g_30gb_stock_partition1.img --ipsw .\firmware\iPod_25.1.3.ipsw --sector-size 2048
 ```
 
 This checks each directory entry's bounds and reports whether the stored checksum field matches a simple byte sum; the field may use a different meaning for some image types.
@@ -100,11 +108,11 @@ This checks each directory entry's bounds and reports whether the stored checksu
 To compare the raw bytes of the backup and IPSW payload without extracting either file, run:
 
 ```powershell
-python .\tools\compare_firmware_backup.py --ipsw .\firmware\iPod_25.1.3.ipsw --backup .\firmware\ipod_video_5.5g_30gb_stock_partition1.img
+py .\tools\compare_firmware_backup.py --ipsw .\firmware\iPod_25.1.3.ipsw --backup .\firmware\ipod_video_5.5g_30gb_stock_partition1.img
 ```
 
 Firmware images and device backups stay under `firmware/`, which Git ignores; only source code and documentation belong in the public repository.
 
 ## What is ready
 
-The project currently contains the UI concept, read-only backup and firmware inspection tools, and a component-level comparison of the stock device backup against Apple's IPSW. The visual is a mockup only. No crossfade code has been inserted into RetailOS, and there is no installable firmware image yet: the music PCM mixing point and the stock menu/settings integration have not been identified and validated.
+The project currently contains the UI concept, read-only backup and firmware inspection tools, a component-level comparison of the stock device backup against Apple's IPSW, and a verified computer-side WAV crossfade prototype. The visual is a mockup only. No crossfade code has been inserted into RetailOS, and there is no installable firmware image yet: the music PCM mixing point and the stock menu/settings integration have not been identified and validated.
