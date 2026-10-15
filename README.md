@@ -39,6 +39,10 @@ py .\tools\find_firmware_strings.py .\firmware\iPod_25.1.3.ipsw --type RSRC --co
 ```
 
 See [`docs/RESEARCH_STATUS.md`](docs/RESEARCH_STATUS.md) for current findings and the reverse-engineering sequence.
+The latest verified audio references, stock Settings resource map, and offline
+partition-image builder are described in [`docs/AUDIO_XREF_NOTES.md`](docs/AUDIO_XREF_NOTES.md),
+[`ui/stock_resource_map.md`](ui/stock_resource_map.md), and
+[`docs/IMAGE_FORMAT.md`](docs/IMAGE_FORMAT.md).
 
 For a host-side demonstration of the mixing algorithm, use two uncompressed 16-bit WAV files with the same sample rate and channel count:
 
@@ -115,4 +119,4 @@ Firmware images and device backups stay under `firmware/`, which Git ignores; on
 
 ## What is ready
 
-The project currently contains the UI concept, read-only backup and firmware inspection tools, a component-level comparison of the stock device backup against Apple's IPSW, and a verified computer-side WAV crossfade prototype. The visual is a mockup only. No crossfade code has been inserted into RetailOS, and there is no installable firmware image yet: the music PCM mixing point and the stock menu/settings integration have not been identified and validated.
+The project currently contains the UI concept, read-only backup and firmware inspection tools, a component-level comparison of the stock device backup against Apple's IPSW, a verified computer-side WAV crossfade prototype, and a structurally checked offline image builder. The visual is a mockup only. No crossfade code has been inserted into RetailOS, and there is no installable firmware image yet: the music PCM mixing point and the stock menu/settings integration have not been identified and validated. The image builder cannot establish audio or UI behavior.
