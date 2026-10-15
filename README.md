@@ -35,4 +35,6 @@ python .\tools\backup_ipod_firmware.py --disk-number 1 --data-drive E --output .
 
 The script opens the physical disk read-only, verifies the iPod partition layout, cross-checks its FAT32 data partition against the selected drive letter, and refuses to overwrite an existing backup. It writes a raw image of the iPod firmware partition plus a JSON manifest with its SHA-256 hash.
 
+Some USB bridges report a 2048-byte logical sector size for this iPod. The reader now obtains that size from Windows and aligns raw reads accordingly, while interpreting MBR partition offsets in 512-byte units. The backup file still contains only the exact byte range of the firmware partition.
+
 The official Apple restore package `firmware/iPod_25.1.3.ipsw` is already downloaded and verified separately. It is a clean restore image, not a read-back of the copy currently installed on the device.

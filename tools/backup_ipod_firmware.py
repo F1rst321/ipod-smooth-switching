@@ -52,30 +52,40 @@ def open_disk(disk_number: int) -> wintypes.HANDLE:
     return handle
 
 
-def read_at(handle: wintypes.HANDLE, offset: int, count: int) -> bytes:
+def read_at(handle: wintypes.HANDLE, offset: int, count: int, alignment: int) -> bytes:
+    """Read an arbitrary byte range using device-aligned raw I/O."""
+    if alignment <= 0:
+        raise BackupError(f"Invalid logical sector size reported by Windows: {alignment}")
+    aligned_offset = offset - (offset % alignment)
+    skip = offset - aligned_offset
+    aligned_end = ((offset + count + alignment - 1) // alignment) * alignment
+    aligned_count = aligned_end - aligned_offset
+
     kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
     set_pointer = kernel32.SetFilePointerEx
     set_pointer.argtypes = [wintypes.HANDLE, ctypes.c_longlong,
                             ctypes.POINTER(ctypes.c_longlong), wintypes.DWORD]
     set_pointer.restype = wintypes.BOOL
-    if not set_pointer(handle, offset, None, FILE_BEGIN):
-        raise win_error(f"Cannot seek to byte offset {offset}")
+    if not set_pointer(handle, aligned_offset, None, FILE_BEGIN):
+        raise win_error(f"Cannot seek to byte offset {aligned_offset}")
 
     read_file = kernel32.ReadFile
     read_file.argtypes = [wintypes.HANDLE, wintypes.LPVOID, wintypes.DWORD,
                           ctypes.POINTER(wintypes.DWORD), wintypes.LPVOID]
     read_file.restype = wintypes.BOOL
-    buffer = ctypes.create_string_buffer(count)
+    buffer = ctypes.create_string_buffer(aligned_count)
     actual = wintypes.DWORD()
-    if not read_file(handle, buffer, count, ctypes.byref(actual), None):
-        raise win_error(f"Cannot read {count} bytes at offset {offset}")
-    if actual.value != count:
-        raise BackupError(f"Short read at offset {offset}: got {actual.value}, expected {count}")
-    return buffer.raw
+    if not read_file(handle, buffer, aligned_count, ctypes.byref(actual), None):
+        raise win_error(f"Cannot read {aligned_count} aligned bytes at offset {aligned_offset}")
+    if actual.value != aligned_count:
+        raise BackupError(
+            f"Short read at aligned offset {aligned_offset}: got {actual.value}, expected {aligned_count}"
+        )
+    return buffer.raw[skip:skip + count]
 
 
 def parse_mbr(sector: bytes) -> list[dict[str, int]]:
-    if len(sector) != SECTOR_SIZE or sector[510:512] != b"\x55\xaa":
+    if len(sector) < SECTOR_SIZE or sector[510:512] != b"\x55\xaa":
         raise BackupError("Disk has no valid MBR signature; refusing to guess the layout")
     result = []
     for index in range(4):
@@ -118,7 +128,22 @@ def main() -> int:
     close_handle.restype = wintypes.BOOL
     partial_created = False
     try:
-        mbr = read_at(handle, 0, SECTOR_SIZE)
+        try:
+            import subprocess
+            disk_info = subprocess.run(
+                ["powershell", "-NoProfile", "-Command",
+                 f"(Get-Disk -Number {args.disk_number}).LogicalSectorSize"],
+                check=True, capture_output=True, text=True,
+            )
+            logical_sector_size = int(disk_info.stdout.strip())
+        except Exception as exc:
+            raise BackupError(
+                f"Could not read PhysicalDrive{args.disk_number}'s logical sector size from Windows: {exc}"
+            ) from exc
+        if logical_sector_size < SECTOR_SIZE or logical_sector_size % SECTOR_SIZE:
+            raise BackupError(f"Unsupported logical sector size reported by Windows: {logical_sector_size}")
+
+        mbr = read_at(handle, 0, logical_sector_size, logical_sector_size)
         partitions = parse_mbr(mbr)
         if len(partitions) < 2:
             raise BackupError("Expected an iPod firmware partition and a FAT32 data partition")
@@ -129,6 +154,8 @@ def main() -> int:
         if not data or data["type"] not in FAT32_TYPES:
             raise BackupError("MBR entry 2 is not a FAT32 iPod data partition; refusing to read")
 
+        # MBR partition LBAs are in 512-byte units, even when a USB bridge
+        # advertises a larger logical I/O sector. read_at handles alignment.
         volume_offset = firmware["start_sector"] * SECTOR_SIZE
         volume_size = firmware["sector_count"] * SECTOR_SIZE
         data_offset = data["start_sector"] * SECTOR_SIZE
@@ -150,6 +177,7 @@ def main() -> int:
 
         print(f"Verified iPod-style MBR on PhysicalDrive{args.disk_number}")
         print(f"Firmware partition: offset {volume_offset:,}, size {volume_size:,} bytes")
+        print(f"Logical sector size: {logical_sector_size} bytes")
         print(f"Data partition: {drive}: offset {data_offset:,}, size {data_size:,} bytes (cross-check OK)")
         print("Reading firmware partition only; opening the device read-only.")
 
@@ -160,7 +188,7 @@ def main() -> int:
             offset = volume_offset
             while remaining:
                 amount = min(CHUNK_SIZE, remaining)
-                block = read_at(handle, offset, amount)
+                block = read_at(handle, offset, amount, logical_sector_size)
                 destination.write(block)
                 digest.update(block)
                 offset += amount
