@@ -40,6 +40,8 @@ python .\tools\find_firmware_strings.py .\firmware\iPod_25.1.3.ipsw --type RSRC 
 
 See [`docs/RESEARCH_STATUS.md`](docs/RESEARCH_STATUS.md) for current findings and the reverse-engineering sequence.
 
+The requested click-wheel settings screen is documented in [`docs/UI_CONCEPT.md`](docs/UI_CONCEPT.md); the visual mockup is [`docs/mockups/crossfade-wheel-settings.png`](docs/mockups/crossfade-wheel-settings.png). It is a design preview, not a firmware screenshot.
+
 Check that known RetailOS 1.3 UI hook signatures still match the input image:
 
 ```powershell
@@ -52,6 +54,14 @@ For ARM disassembly, install the optional analyzer dependency once in the projec
 python -m pip install -r .\requirements-analysis.txt
 python .\tools\disassemble_arm.py .\firmware\iPod_25.1.3.ipsw --start 0x21f254 --count 64
 ```
+
+To locate direct ARM `BL` callers of a byte offset in OSOS, use the read-only helper:
+
+```powershell
+python .\tools\find_arm_callers.py .\firmware\iPod_25.1.3.ipsw --target 0x25a614
+```
+
+It does not find Thumb or indirect calls, and every match must be checked in context before being treated as a code reference.
 
 ## Backup of the firmware currently on the iPod
 
