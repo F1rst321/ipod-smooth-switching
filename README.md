@@ -40,6 +40,12 @@ python .\tools\find_firmware_strings.py .\firmware\iPod_25.1.3.ipsw --type RSRC 
 
 See [`docs/RESEARCH_STATUS.md`](docs/RESEARCH_STATUS.md) for current findings and the reverse-engineering sequence.
 
+Check that known RetailOS 1.3 UI hook signatures still match the input image:
+
+```powershell
+python .\tools\check_research_hooks.py .\firmware\iPod_25.1.3.ipsw
+```
+
 ## Backup of the firmware currently on the iPod
 
 Windows restricts raw-disk access to an elevated PowerShell session. In PowerShell opened **as Administrator**, run this from the project directory (confirm the disk number and drive letter first):
