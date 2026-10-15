@@ -9,7 +9,7 @@ Research project to add configurable track crossfade to the original Apple firmw
 
 ## Current milestone
 
-Safely identify and inspect the stock firmware package. No device writing or firmware patching is performed by the initial tool.
+Create verified, local working copies of firmware components and map the exact settings and audio playback code before implementing a patch. The tools do not write to the iPod and do not distribute Apple's firmware files.
 
 The device-reported version is 1.3. The matching late-2006 30 GB firmware family is `iPod_25.1.3.ipsw`; verify the downloaded package before analysis.
 
@@ -24,6 +24,21 @@ The device-reported version is 1.3. The matching late-2006 30 GB firmware family
 ## Usage
 
 Run `python tools/inspect_ipsw.py path\to\iPod_25.1.3.ipsw` to list package entries and print the package SHA-1.
+
+Extract OSOS and RSRC to a new directory (the firmware files are ignored by Git):
+
+```powershell
+python .\tools\extract_firmware_images.py .\firmware\iPod_25.1.3.ipsw --output-dir .\firmware\extracted\official
+```
+
+The extractor refuses to overwrite an existing output directory and records source/component hashes in `manifest.json`. Search a component directly from IPSW without creating an extracted binary:
+
+```powershell
+python .\tools\find_firmware_strings.py .\firmware\iPod_25.1.3.ipsw --type OSOS --contains audio
+python .\tools\find_firmware_strings.py .\firmware\iPod_25.1.3.ipsw --type RSRC --contains settings
+```
+
+See [`docs/RESEARCH_STATUS.md`](docs/RESEARCH_STATUS.md) for current findings and the reverse-engineering sequence.
 
 ## Backup of the firmware currently on the iPod
 

@@ -1,0 +1,10 @@
+[project]
+name = "ipod-video-crossfade"
+version = "0.1.0"
+description = "Offline research and patch preparation tools for iPod Video 5.5G stock firmware"
+requires-python = ">=3.11"
+dependencies = []
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
