@@ -63,6 +63,14 @@ python .\tools\find_arm_callers.py .\firmware\iPod_25.1.3.ipsw --target 0x25a614
 
 It does not find Thumb or indirect calls, and every match must be checked in context before being treated as a code reference.
 
+To search for aligned absolute 32-bit pointers to an OSOS string or function, use:
+
+```powershell
+python .\tools\find_pointer_references.py .\firmware\iPod_25.1.3.ipsw --target 0x213e10
+```
+
+This is a narrow scan; a lack of matches does not mean the target is unused. PC-relative, Thumb, and computed references require other analysis.
+
 ## Backup of the firmware currently on the iPod
 
 Windows restricts raw-disk access to an elevated PowerShell session. In PowerShell opened **as Administrator**, run this from the project directory (confirm the disk number and drive letter first):
