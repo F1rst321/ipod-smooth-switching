@@ -45,6 +45,8 @@ partition-image builder are described in [`docs/AUDIO_XREF_NOTES.md`](docs/AUDIO
 [`docs/IMAGE_FORMAT.md`](docs/IMAGE_FORMAT.md).
 To reproduce the HIBE/OSOS comparison and list runtime references to the audio endpoints, run
 `py .\tools\analyze_hibe_runtime.py .\firmware\ipod_video_5.5g_30gb_stock_partition1.img`.
+To inspect the saved I²S interface registry and queued object vtables without accessing the iPod, run
+`py .\tools\inspect_hibe_audio.py .\firmware\ipod_video_5.5g_30gb_stock_partition1.img`.
 
 For a host-side demonstration of the mixing algorithm, use two uncompressed 16-bit WAV files with the same sample rate and channel count:
 
