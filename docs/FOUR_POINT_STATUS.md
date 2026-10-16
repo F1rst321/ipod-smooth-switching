@@ -33,3 +33,15 @@ Windows показывает подключённый Apple iPod как USB-ди
 Публичная спецификация с именем `iPod_5_5G_Video_Enhanced_25_1_3.md` использует смещения относительно полного IPSW payload; локальный OSOS внутри него начинается с `0x4800`. Для пяти строк проверено соответствие `offset_spec - 0x4800 = offset_OSOS`: `AudioCodecs` `0x17a888 → 0x176088`, `TrackCacheReadTask` `0x99174 → 0x94974`, `StreamCacheReadTask` `0x210664 → 0x20be64`, `MP3ExampleTask` `0x16f904 → 0x16b104`, `GotoBackToIdleCommand` `0x4b8c04 → 0x4b4404`. При этом общий размер и хеш бинарника в спецификации отличаются от локального payload. Табличные названия функций там нельзя принимать без проверки дизассемблированием: некоторые записи указывают на строки.
 
 Источники: [спецификация 25.1.3](https://github.com/giek2000/ipod-classic-firmware-research/blob/main/specs/iPod_5_5G_Video_Enhanced_25_1_3.md), [описание UI-хуков другого патча](https://www.reddit.com/r/IpodClassic/comments/1wy2cwz/dark_mode_album_artwork_on_patched_stock_os/), [эмулятор 5.5G](https://github.com/siggifly/ipod-emulator), [Rockbox PP502x PCM-драйвер](https://github.com/Rockbox/rockbox/blob/master/firmware/target/arm/pp/pcm-pp.c).
+
+## Новая проверка точки UI-перехвата
+
+16 октября 2026 года адрес `OSOS+0x21f254`, опубликованный автором отдельного
+RetailOS-патча как общий перехватчик чтения ресурсов, декомпилирован в Ghidra
+для точного OSOS из резервной копии. Это реальная функция обхода связанного
+списка поставщиков ресурсов и вызова их виртуального метода поиска; найдено
+83 ссылки на неё. Таким образом, общий ресурсный hook подтверждён как
+исследовательская точка для будущей замены Menu/View ресурсов. Это **не**
+готовый hook: машинный код trampoline, место для внедрения, Click Wheel
+dispatcher и формат независимой настройки не реализованы и не проверены на
+устройстве. Детали внесены в [`stock_resource_map.md`](../ui/stock_resource_map.md).

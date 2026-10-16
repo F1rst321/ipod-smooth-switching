@@ -78,6 +78,40 @@ helpers, and clears dirty byte `+0xb74` at `0x0bbed8` after its write path.
 This establishes the current Volume Limit setting's persistence path; the
 exact file format and a safe place for a new persisted key are still unknown.
 
+## Resource lookup hook confirmed by Ghidra
+
+The externally reported RetailOS 1.3 address `OSOS+0x21f254` is a real ARM
+function in this exact OSOS. Its decompilation is:
+
+```c
+local_18 = 0;
+while (param_1 != 0 &&
+       ((**(code **)(*param_1 + 0x5c))(param_1, param_2, param_3,
+                                         &local_18), result == 0)) {
+    param_1 = (int *)param_1[4];
+}
+return local_18;
+```
+
+It walks a linked list of resource providers, calls each provider's virtual
+lookup method at byte offset `0x5c`, and returns the first nonzero result.
+Ghidra found 83 code references to this function, including callers in the
+resource and view paths. This confirms a viable *candidate interception point*
+for modifying resource lookup before a view is created. It does not establish
+the calling convention of a custom trampoline beyond the displayed function
+signature, the boot-time timing of the first lookup, or how to reserve and
+execute injected ARM code. The address and hook description were independently
+reported by a community RetailOS patch author; no public source repository for
+that patch was found as of 2026-10-16.
+
+The result narrows the UI investigation: a future patch can inspect resource
+IDs at this boundary and provide a replacement view or menu through an added
+provider, if that provider can be safely installed. It does not by itself add
+a nineteenth Settings row, create a Click Wheel slider, or persist its value.
+The precise event dispatcher and a noncolliding preference field remain
+unresolved, so this discovery is not enough to build or install the requested
+screen.
+
 The writer at `0x0bbdf8` loads the literal length `0xb6c` (2924 bytes),
 allocates that many bytes via `0x0a8178`, and copies the current preferences
 area through `0x0a8098` before the file write at `0x0bbed4`. The connected
