@@ -59,6 +59,23 @@ its parsed IDs range from 152 to 5009. Therefore the menu `cmd` values
 as an aligned word only in its menu row and has no same-ID View resource.
 The behavior of `cmd` is not yet established across the different Settings rows.
 
+Ghidra confirms that OSOS function `+0x16c080` registers a resource parser for
+the on-disk `ltnC` element type (`Cntl`, registration ID `0x4b82`). This shows
+that RetailOS has a parser for these interactive-looking View elements, but
+does not identify their behavior. The Volume Limit View 17538 contains no
+`Cntl` element, and the other parsed `Cntl` elements still have no resource
+link to the Settings row or evidence of a Click Wheel value handler.
+
+The parser's control class installs vtable `OSOS+0x66a860`; slot `+0x30`
+points to event method `+0x16c328`. The method branches on event values
+`0x09` and `0x19`. For `0x09`, its helper `+0x16bd34` changes an internal
+selection index at object offset `+0x78`, bounds it using fields `+0x80` and
+`+0x8c`, then refreshes the visual position at `+0x88`. This is evidence of a
+generic event-driven control with selection state. It does not establish that
+event `0x09` is a Click Wheel step, that this control edits a numeric setting,
+or that it is used by the Settings rows above. The exact wheel-to-view event
+mapping and a value-writing control remain unconfirmed.
+
 The settings-object vtable at `0x66c94c/0x66c950` contains code offsets
 `0x190b00/0x1919d8` (get/set). In the getter, `0x190d90..0x190da4`
 compares a property key to **`0x604f`** and reads `[settings_object+0x84]` on

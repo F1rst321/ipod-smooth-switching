@@ -40,6 +40,13 @@ class Snapshot:
     def u32(self, address: int) -> int:
         return struct.unpack("<I", self.read(address, 4))[0]
 
+    @staticmethod
+    def native_ram_address(address: int) -> int:
+        """Resolve the PP5022C uncached SDRAM alias to the native window."""
+        if 0x14000000 <= address < 0x18000000:
+            return 0x10000000 | (address & 0x03FFFFFF)
+        return address
+
     def find_vtable(self, offset: int) -> list[int]:
         needle = struct.pack("<I", offset)
         cursor = HIBE_SNAPSHOT_OFFSET + OSOS_SIZE
@@ -51,6 +58,22 @@ class Snapshot:
             if (position - HIBE_SNAPSHOT_OFFSET) % 4 == 0:
                 found.append(RAM_BASE + position - HIBE_SNAPSHOT_OFFSET)
             cursor = position + 1
+
+    def find_runtime_ascii(self, needle: bytes) -> list[tuple[int, str]]:
+        """Find NUL-terminated ASCII strings after HIBE's copied OSOS image."""
+        cursor = HIBE_SNAPSHOT_OFFSET + OSOS_SIZE
+        found: list[tuple[int, str]] = []
+        while True:
+            position = self.hibe.find(needle, cursor)
+            if position < 0:
+                return found
+            end = self.hibe.find(b"\0", position)
+            if end < 0:
+                end = len(self.hibe)
+            address = RAM_BASE + position - HIBE_SNAPSHOT_OFFSET
+            value = self.hibe[position:end].decode("ascii", errors="replace")
+            found.append((address, value))
+            cursor = position + len(needle)
 
 
 def main() -> int:
@@ -76,6 +99,43 @@ def main() -> int:
 
     print(f"Backup SHA-256: {hashlib.sha256(raw).hexdigest()}")
     print(f"Firmware format: {version}; OSOS/HIBE: {len(osos):,}/{len(hibe):,} bytes")
+
+    video_core_paths = snapshot.find_runtime_ascii(b"Resources/VideoCore/Library/")
+    print(f"VideoCore library path strings after copied OSOS: {len(video_core_paths)}")
+    for address, path in video_core_paths:
+        print(f"  RAM 0x{address:08x}: {path}")
+    runtime_pcmplayer = snapshot.find_runtime_ascii(b"pcmplayer.vll")
+    print(f"Runtime pcmplayer.vll path strings after copied OSOS: {len(runtime_pcmplayer)}")
+    for address, path in runtime_pcmplayer:
+        print(f"  RAM 0x{address:08x}: {path}")
+
+    # The playback object pointer is stored through the uncached SDRAM alias.
+    # HIBE contains only the lower 32 MiB of the 5.5G's 64 MiB SDRAM, so only
+    # report an object body when its normalized address is in that snapshot.
+    queue = snapshot.native_ram_address(0x149388B0)
+    item_alias = snapshot.u32(queue + 0x78)
+    item = snapshot.native_ram_address(item_alias)
+    print(f"TPCMQUEUE object RAM 0x{queue:08x}; +0x78 item pointer: 0x{item_alias:08x} "
+          f"(native alias 0x{item:08x})")
+    if RAM_BASE <= item < RAM_BASE + RAM_SIZE:
+        item_vtable = snapshot.u32(item)
+        print(f"  captured item vtable offset: 0x{item_vtable:08x}")
+        if item_vtable == 0x00666284:
+            fsbuf = item + 0x270
+            print(f"  playback wrapper's FSbuf at RAM 0x{fsbuf:08x}; "
+                  f"vtable offset 0x{snapshot.u32(fsbuf):08x}")
+    else:
+        print("  item body is outside the RAM captured by HIBE")
+
+    for name, vtable in (
+        ("playback wrapper", 0x00666284),
+        ("FSbuf", 0x00674628),
+        ("shared sync/resource object", 0x0066E0C4),
+    ):
+        instances = snapshot.find_vtable(vtable)
+        print(f"Captured {name} vtable references: {len(instances)}")
+        for address in instances[:8]:
+            print(f"  RAM 0x{address:08x}")
 
     manager_global = 0x1081ECC8
     manager = snapshot.u32(manager_global)
@@ -117,6 +177,17 @@ def main() -> int:
               f"destination 0x{destination:08x}, buffer slots "
               f"0x{buffer:08x}/0x{alternate_buffer:08x}, length 0x{length:x}, "
               f"slot distance 0x{abs(buffer - alternate_buffer):x}")
+        if 0 < length <= 0x20000:
+            for slot in (buffer, alternate_buffer):
+                native_slot = snapshot.native_ram_address(slot)
+                try:
+                    block = snapshot.read(native_slot, length)
+                except ValueError:
+                    print(f"  DMA slot 0x{slot:08x} is outside the captured RAM range")
+                    continue
+                nonzero = sum(byte != 0 for byte in block)
+                print(f"  DMA slot 0x{slot:08x} (native 0x{native_slot:08x}): "
+                      f"{nonzero}/{len(block)} nonzero bytes")
     print("These are saved RAM pointers/state only; the script does not access the device.")
     return 0
 
