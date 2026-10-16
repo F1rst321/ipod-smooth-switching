@@ -45,6 +45,14 @@
 копирование, очистка и управляющие события, но не арифметика смешивания двух
 PCM-потоков.
 
+При инициализации playback-объекта `+0x24b5bc` вызывает selectors
+`+0x111c58` и `+0x112ee0`. Первый выбирает один из адресов
+`0x149dd4c8`, `0x149dd554` или `0x149dd638` по результату `+0x2653a4`
+(состояния 1–3); второй возвращает `0x149dd750`. Эти адреса находятся за
+пределами файла OSOS, поэтому статический образ позволяет связать плеер с
+выбором аппаратного endpoint-а, но не открыть его структуры или увидеть
+буферы PCM.
+
 Вызов `+0x1e0d60` у другого клиента `+0x1254d0` принадлежит объекту
 `SpdifEbuScanner`: его vtable `+0x66c154` указывает на worker `+0x18d3b4`,
 который вызывает этот путь. Там тип `1` обслуживает кольцо из 16 записей
@@ -201,7 +209,7 @@ $env:JAVA_HOME = 'C:\Users\ilyan\AppData\Local\ipod-crossfade-tools\jdk-25.0.4.1
 $env:XDG_CONFIG_HOME = (Join-Path (Get-Location) 'build\ghidra-settings')
 $env:XDG_CACHE_HOME = (Join-Path (Get-Location) 'build\ghidra-cache')
 $ghidra = 'C:\Users\ilyan\AppData\Local\ipod-crossfade-tools\ghidra_12.1.4_PUBLIC\support\analyzeHeadless.bat'
-& $ghidra (Join-Path (Get-Location) 'build\ghidra-projects') RetailOS_1_3 -process osos.bin -noanalysis -readOnly -scriptPath (Join-Path (Get-Location) 'tools\ghidra') -postScript DumpRetailFunctions.java 0x18c85c 0x18c6d8 0x1a3080 0x1a2790 0x1a2b74 0x1a2d60 0x1254d0
+& $ghidra (Join-Path (Get-Location) 'build\ghidra-projects') RetailOS_1_3 -process osos.bin -noanalysis -readOnly -scriptPath (Join-Path (Get-Location) 'tools\ghidra') -postScript DumpRetailFunctions.java 0x18c85c 0x18c6d8 0x1a3080 0x1a2790 0x1a2b74 0x1a2d60 0x1254d0 0x24b5bc 0x111c58 0x112ee0 0x2653a4
 ```
 
 Извлечённые `osos.bin` и `rsrc.bin` лежат в `firmware/extracted/audio-analysis/`; каталог находится под `firmware/` и исключён из Git. Исходная резервная копия остаётся неизменённой.
