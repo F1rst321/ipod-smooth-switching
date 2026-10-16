@@ -43,6 +43,15 @@ only three locations: the View resource table (`0x336d10`), the Settings row
 resource relationship; it does **not** identify the code handling Click Wheel
 movement or storing the Volume Limit value.
 
+The exact View 17538 contains no `Cntl` element. A scan of all 619 Views found
+23 `Cntl` elements across 21 other Views; their resource graph does not link
+them to Settings row `cmd=17538` or Brightness row `cmd=17286`. These controls
+cannot be assigned as the stock Settings wheel slider without further runtime
+evidence. A full Ghidra analysis also produced no direct code references to
+the settings getter/setter functions or their vtable entries; the known
+getter/setter addresses appear only as 32-bit OSOS-relative values in the
+settings-object table at `0x66c94c`.
+
 The main `TCmd` resource begins at `0x4b441c` and has 1064 indexed entries;
 its parsed IDs range from 152 to 5009. Therefore the menu `cmd` values
 17538 and 17286 are not TCmd entry IDs. The Brightness value `0x4386` appears
