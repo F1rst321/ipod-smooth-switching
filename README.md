@@ -87,13 +87,13 @@ py .\tools\find_thumb_callers.py .\firmware\iPod_25.1.3.ipsw --target 0x25db30
 
 This scan also reports raw byte-pattern candidates, not confirmed reachable calls; it does not find indirect calls.
 
-To search for aligned absolute 32-bit pointers to an OSOS string or function, use:
+To search for aligned image-relative or absolute 32-bit pointers to an OSOS string or function, use:
 
 ```powershell
 py .\tools\find_pointer_references.py .\firmware\iPod_25.1.3.ipsw --target 0x213e10
 ```
 
-This is a narrow scan; a lack of matches does not mean the target is unused. PC-relative, Thumb, and computed references require other analysis.
+This scans aligned image-relative and absolute pointer words; a lack of matches does not mean the target is unused. PC-relative, Thumb, and computed references require other analysis.
 
 ## Backup of the firmware currently on the iPod
 

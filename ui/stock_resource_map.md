@@ -47,10 +47,11 @@ The exact View 17538 contains no `Cntl` element. A scan of all 619 Views found
 23 `Cntl` elements across 21 other Views; their resource graph does not link
 them to Settings row `cmd=17538` or Brightness row `cmd=17286`. These controls
 cannot be assigned as the stock Settings wheel slider without further runtime
-evidence. A full Ghidra analysis also produced no direct code references to
-the settings getter/setter functions or their vtable entries; the known
-getter/setter addresses appear only as 32-bit OSOS-relative values in the
-settings-object table at `0x66c94c`.
+evidence. The getter and setter are confirmed as the two image-relative
+function-pointer entries at `0x66c94c` and `0x66c950` (`0x190b00` and
+`0x1919d8`). Ghidra's ordinary xref pass did not resolve these values as loaded
+addresses; this finding does not establish where the settings-object table is
+selected or which UI callback dispatches to it.
 
 The main `TCmd` resource begins at `0x4b441c` and has 1064 indexed entries;
 its parsed IDs range from 152 to 5009. Therefore the menu `cmd` values
