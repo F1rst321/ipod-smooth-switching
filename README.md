@@ -77,6 +77,14 @@ py .\tools\find_arm_callers.py .\firmware\iPod_25.1.3.ipsw --target 0x25a614
 
 It does not find Thumb or indirect calls, and every match must be checked in context before being treated as a code reference.
 
+To scan direct Thumb-1 `BL` pairs to an OSOS offset:
+
+```powershell
+py .\tools\find_thumb_callers.py .\firmware\iPod_25.1.3.ipsw --target 0x25db30
+```
+
+This scan also reports raw byte-pattern candidates, not confirmed reachable calls; it does not find indirect calls.
+
 To search for aligned absolute 32-bit pointers to an OSOS string or function, use:
 
 ```powershell
