@@ -111,9 +111,12 @@ def main() -> int:
         endpoint = snapshot.u32(callback + 4)
         destination = snapshot.u32(endpoint + 0x1C)
         buffer = snapshot.u32(endpoint + 0x20)
+        alternate_buffer = snapshot.u32(endpoint + 0x14)
         length = snapshot.u32(endpoint + 0x24)
         print(f"I2S callback RAM 0x{callback:08x}: endpoint RAM 0x{endpoint:08x}; "
-              f"destination 0x{destination:08x}, buffer 0x{buffer:08x}, length 0x{length:x}")
+              f"destination 0x{destination:08x}, buffer slots "
+              f"0x{buffer:08x}/0x{alternate_buffer:08x}, length 0x{length:x}, "
+              f"slot distance 0x{abs(buffer - alternate_buffer):x}")
     print("These are saved RAM pointers/state only; the script does not access the device.")
     return 0
 
