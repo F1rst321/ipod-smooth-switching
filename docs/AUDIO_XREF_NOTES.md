@@ -137,6 +137,9 @@ SHA-256 `784ae3d5540fd2f89e8c947b93629e97f62a06dc311d9745aab143e4db6bb251`.
 `build/ghidra-pcmqueue-writer-trace.log`,
 `build/ghidra-audio-helper-trace.log`, `build/ghidra-queue-producers.log` и
 `build/ghidra-player-codec-class.log`; каталог `build/` не публикуется.
+Полный автоматический анализ Ghidra (70 секунд на точном OSOS) не добавил
+статических xref-ов на слова таблицы по `+0x66e1b0…+0x66e1d4`; сопоставление
+владельца этой таблицы с музыкальным playback-context осталось открытым.
 
 В конструкторе playback-объекта `+0x24b5bc` сохраняются результаты selectors
 `FUN_10111c58` (`+0x111c58`) и `FUN_10112ee0` (`+0x112ee0`).
