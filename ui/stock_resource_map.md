@@ -22,6 +22,11 @@ at `0x30fcf4`; the first row's label (`textID2=-133`) is **«Конфигура�
 there, where English has “About”. This is a string-table observation, not a
 claim about the page title or translation quality.
 
+The main block header's `length=0x6854` equals exactly its header plus eight
+section descriptors plus all resource records; it is the table length, not a
+free-space budget. Menu 24598 ends at `0x4af804`, and the next resource starts
+at precisely `0x4af804`. There is no in-place space for an extra row.
+
 Relevant current Settings rows:
 
 | Row | Label in stock Russian | Row offset | `cmd` | `textID2` |
