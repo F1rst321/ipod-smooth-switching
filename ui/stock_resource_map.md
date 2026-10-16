@@ -102,8 +102,16 @@ for modifying resource lookup before a view is created. It does not establish
 the calling convention of a custom trampoline beyond the displayed function
 signature, the boot-time timing of the first lookup, or how to reserve and
 execute injected ARM code. The address and hook description were independently
-reported by a community RetailOS patch author; no public source repository for
-that patch was found as of 2026-10-16.
+reported by a community RetailOS patch author. On 2026-10-16, a public account
+of a separate RetailOS 1.3 Dark Mode patch described hooking this function
+before the first View lookup, adding a Settings row, and patching the settings
+object getter/setter at `0x66c94c/0x66c950`. The author reports that selection
+is saved through stock settings and applied after a restart. This supports
+these addresses as practical patch points, but the source code is not yet
+public and the implementation has not been verified against this project's
+backup. It does not demonstrate a Click Wheel slider, a new persisted integer
+setting, or an audio mixer. Source: [Dark Mode & Album Artwork on patched
+Stock OS](https://www.reddit.com/r/IpodClassic/comments/1wy2cwz/dark_mode_album_artwork_on_patched_stock_os/).
 
 The result narrows the UI investigation: a future patch can inspect resource
 IDs at this boundary and provide a replacement view or menu through an added
