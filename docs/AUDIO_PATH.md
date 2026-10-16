@@ -113,10 +113,27 @@ MP3-декодера или отдельного `pcmplayer`-API. Это огр�
 контекст для следующей музыкальной композиции, и не раскрывает ARM↔VideoCore
 протокол для этого сценария.
 
+Таблица импортов уточняет границу этой подсистемы. `MPLAYER VLL`
+(`RSRC+0x44a800`) импортирует `audio_playopen`, `audio_playstart`,
+`audio_playpause`, функции часов и `audioplus_register_callback`; это
+подтверждает, что VideoCore MPlayer запрашивает аудиовывод через API хоста.
+Импорты находятся в видеомодуле MPlayer и сами по себе не связывают его со
+штатным музыкальным плеером. Имена `audio_play*` не встречаются в локальном
+OSOS как строки, поэтому статическая текстовая ссылка на реализацию или её
+соответствие музыкальному тракту не установлена. AAC-модуль по
+`RSRC+0x3ff000` экспортирует декодерные функции, но не импортирует тот же
+набор `audio_play*`.
+
 Воспроизводимый обзор экспорта:
 
 ```powershell
 py .\tools\inventory_videocore_elf.py .\firmware\extracted\audio-analysis\rsrc.bin --export decode --export pcm --export audio --export mp3 --export play --export music
+```
+
+Импортированные API можно отфильтровать отдельно:
+
+```powershell
+py .\tools\inventory_videocore_elf.py .\firmware\extracted\audio-analysis\rsrc.bin --import audio --import filesys --import dlsym
 ```
 
 ## Вероятное место будущего смешивания

@@ -59,6 +59,7 @@ def module_at(data: bytes, base: int) -> dict | None:
         return None
 
     exports: set[str] = set()
+    imports: set[str] = set()
     for section in sections:
         if section[1] not in (SHT_SYMTAB, SHT_DYNSYM):
             continue
@@ -74,13 +75,16 @@ def module_at(data: bytes, base: int) -> dict | None:
                 data, base + section[4] + index * SYMBOL.size
             )
             name = c_string(strings, name_offset)
-            if name and shndx and (info >> 4) in (STB_GLOBAL, STB_WEAK) and (info & 0x0f) == STT_FUNC:
-                exports.add(name)
+            if name and (info >> 4) in (STB_GLOBAL, STB_WEAK):
+                if shndx and (info & 0x0f) == STT_FUNC:
+                    exports.add(name)
+                elif not shndx:
+                    imports.add(name)
 
     end = max([table_end] + [base + section[4] + section[5]
                              for section in sections if section[1] != 8])
     return {"offset": base, "end": end, "sections": shnum,
-            "exports": sorted(exports)}
+            "exports": sorted(exports), "imports": sorted(imports)}
 
 
 def scan(data: bytes):
@@ -102,6 +106,8 @@ def main() -> int:
     parser.add_argument("component", type=Path, help="extracted RSRC or raw firmware image")
     parser.add_argument("--export", action="append", default=[],
                         help="show exported function names containing this substring (repeatable)")
+    parser.add_argument("--import", dest="import_filters", action="append", default=[],
+                        help="show imported function names containing this substring (repeatable)")
     args = parser.parse_args()
     data = args.component.read_bytes()
     modules = scan(data)
@@ -111,10 +117,20 @@ def main() -> int:
         if args.export:
             filters = [term.casefold() for term in args.export]
             exports = [name for name in exports if any(term in name.casefold() for term in filters)]
+        elif args.import_filters:
+            exports = []
         print(f"  0x{module['offset']:08x}..0x{module['end']:08x} "
               f"({module['end'] - module['offset']:,} bytes), {module['sections']} sections")
         for name in exports:
             print(f"    {name}")
+        if args.import_filters:
+            filters = [term.casefold() for term in args.import_filters]
+            imports = [name for name in module["imports"]
+                       if any(term in name.casefold() for term in filters)]
+            if imports:
+                print("    Imports:")
+                for name in imports:
+                    print(f"      {name}")
     return 0
 
 
