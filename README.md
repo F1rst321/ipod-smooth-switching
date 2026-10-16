@@ -43,6 +43,8 @@ The latest verified audio references, stock Settings resource map, and offline
 partition-image builder are described in [`docs/AUDIO_XREF_NOTES.md`](docs/AUDIO_XREF_NOTES.md),
 [`ui/stock_resource_map.md`](ui/stock_resource_map.md), and
 [`docs/IMAGE_FORMAT.md`](docs/IMAGE_FORMAT.md).
+To reproduce the HIBE/OSOS comparison and list runtime references to the audio endpoints, run
+`py .\tools\analyze_hibe_runtime.py .\firmware\ipod_video_5.5g_30gb_stock_partition1.img`.
 
 For a host-side demonstration of the mixing algorithm, use two uncompressed 16-bit WAV files with the same sample rate and channel count:
 
