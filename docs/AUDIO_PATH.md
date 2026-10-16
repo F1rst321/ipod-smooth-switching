@@ -232,4 +232,10 @@ $ghidra = 'C:\Users\ilyan\AppData\Local\ipod-crossfade-tools\ghidra_12.1.4_PUBLI
 & $ghidra (Join-Path (Get-Location) 'build\ghidra-projects') RetailOS_1_3 -process osos.bin -noanalysis -readOnly -scriptPath (Join-Path (Get-Location) 'tools\ghidra') -postScript DumpRetailFunctions.java 0x18c85c 0x18c6d8 0x1a3080 0x1a2790 0x1a2b74 0x1a2d60 0x1254d0 0x24b5bc 0x111c58 0x112ee0 0x2653a4
 ```
 
+Цепочку кандидата `MP3ExampleTask` можно воспроизвести в том же проекте:
+
+```powershell
+& $ghidra (Join-Path (Get-Location) 'build\ghidra-projects') RetailOS_1_3 -process osos.bin -noanalysis -readOnly -scriptPath (Join-Path (Get-Location) 'tools\ghidra') -postScript DumpRetailFunctions.java xref_0x16b104 xref_0x16b0b0 xref_0x16b044 0x16b0b0 0x16b044 0x1d28e0
+```
+
 Извлечённые `osos.bin` и `rsrc.bin` лежат в `firmware/extracted/audio-analysis/`; каталог находится под `firmware/` и исключён из Git. Исходная резервная копия остаётся неизменённой.
