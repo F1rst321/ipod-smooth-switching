@@ -40,6 +40,18 @@ class Snapshot:
     def u32(self, address: int) -> int:
         return struct.unpack("<I", self.read(address, 4))[0]
 
+    def find_vtable(self, offset: int) -> list[int]:
+        needle = struct.pack("<I", offset)
+        cursor = HIBE_SNAPSHOT_OFFSET + OSOS_SIZE
+        found: list[int] = []
+        while True:
+            position = self.hibe.find(needle, cursor)
+            if position < 0:
+                return found
+            if (position - HIBE_SNAPSHOT_OFFSET) % 4 == 0:
+                found.append(RAM_BASE + position - HIBE_SNAPSHOT_OFFSET)
+            cursor = position + 1
+
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -93,6 +105,15 @@ def main() -> int:
     print(f"I2S buffer-path object RAM 0x{child:08x}: vtable offset 0x{snapshot.u32(child):08x}")
     print("Buffer-path fields +0x20/+0x24: "
           f"0x{snapshot.u32(child + 0x20):08x}/0x{snapshot.u32(child + 0x24):08x}")
+
+    callback_vtable = 0x66D308
+    for callback in snapshot.find_vtable(callback_vtable):
+        endpoint = snapshot.u32(callback + 4)
+        destination = snapshot.u32(endpoint + 0x1C)
+        buffer = snapshot.u32(endpoint + 0x20)
+        length = snapshot.u32(endpoint + 0x24)
+        print(f"I2S callback RAM 0x{callback:08x}: endpoint RAM 0x{endpoint:08x}; "
+              f"destination 0x{destination:08x}, buffer 0x{buffer:08x}, length 0x{length:x}")
     print("These are saved RAM pointers/state only; the script does not access the device.")
     return 0
 
