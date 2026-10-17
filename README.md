@@ -48,6 +48,12 @@ To reproduce the HIBE/OSOS comparison and list runtime references to the audio e
 To inspect the saved I²S interface registry and queued object vtables without accessing the iPod, run
 `py .\tools\inspect_hibe_audio.py .\firmware\ipod_video_5.5g_30gb_stock_partition1.img`.
 
+The audio worker is copied into IRAM in noncontiguous sections. Direct ARM
+calls from its OSOS bytes can point to different functions at runtime; use
+`tools/trace_iram_calls.py` with a local IRAM capture before assigning a
+callee. The verified example is in
+[`docs/AUDIO_XREF_NOTES.md`](docs/AUDIO_XREF_NOTES.md#коррекция-прямых-вызовов-в-iram).
+
 For a host-side demonstration of the mixing algorithm, use two uncompressed 16-bit WAV files with the same sample rate and channel count:
 
 ```powershell
