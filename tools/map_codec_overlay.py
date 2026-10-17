@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Map the stock provider-0 codec overlay from OSOS into its IRAM addresses.
+"""Map stock audio-provider overlays from OSOS into their IRAM addresses.
 
-The loader at OSOS+0x839c0 copies three code/data ranges and clears three BSS
-ranges. This tool reads the loader's literal words from the exact stock OSOS;
+The provider loaders copy code/data ranges and clear BSS ranges in IRAM.
+This tool reads their literal words from the exact stock OSOS;
 it never writes the firmware or accesses the connected iPod.
 """
 
@@ -21,13 +21,38 @@ OSOS_LOAD_ALIAS = 0x04000000
 IRAM_START = 0x40000000
 IRAM_END = 0x40020000
 
-# Each triple is (source address, IRAM destination, byte length) as passed to
-# the copy helper at OSOS+0x8438c by the provider-0 loader at OSOS+0x839c0.
-COPY_LITERAL_TRIPLES = (
-    (0x840D0, 0x840D4, 0x840D8),
-    (0x840E4, 0x840E8, 0x840EC),
-    (0x840F8, 0x840FC, 0x84100),
-)
+# Triples are literal locations of (source, destination, byte length) passed
+# to OSOS+0x8438c. Pairs are (destination, byte length) passed to +0x843a0.
+# Provider indices follow the six-object registry at OSOS+0x63ee44. Provider 5
+# uses a WAV writer and does not have one of these codec copy loaders.
+PROVIDER_COPY_TRIPLES = {
+    0: (0x840D0, 0x840E4, 0x840F8),
+    1: (0x8410C,),
+    2: (0x841C0, 0x841D4),
+    3: (0x84328, 0x8433C, 0x84350),
+    4: (0x84314,),
+}
+PROVIDER_ZERO_PAIRS = {
+    0: ((0x840E0, 0x840DC), (0x840F4, 0x840F0), (0x84108, 0x84104)),
+    1: ((0x8411C, 0x84118),),
+    2: ((0x841D0, 0x841CC), (0x841E4, 0x841E0)),
+    3: ((0x84338, 0x84334), (0x8434C, 0x84348), (0x84360, 0x8435C)),
+    4: ((0x84324, 0x84320),),
+}
+ITEM_ADDRESS_LITERALS = {
+    0: 0x1A9078, 1: 0x1B1BAC, 2: 0x19F664, 3: 0x1A911C, 4: 0x1B6BC8,
+}
+
+# Both provider-0 render paths load the same absolute addresses. Keep the
+# two literal locations so the report checks each path independently rather
+# than assuming that a per-item decoder context owns these destinations.
+OUTPUT_STATE_LITERALS = {
+    "queue object": (0x4000A8CC, 0x4000AA44),
+    "output pointer slot 0": (0x4000A8D0, 0x4000AA48),
+    "output pointer slot 1": (0x4000A8D4, 0x4000AA4C),
+    "work buffer 1": (0x4000A8D8, 0x4000AA50),
+    "work buffer 0": (0x4000A8DC, 0x4000AA54),
+}
 
 
 @dataclass(frozen=True)
@@ -46,18 +71,53 @@ def read_word(data: bytes, offset: int) -> int:
     return struct.unpack_from("<I", data, offset)[0]
 
 
-def load_ranges(data: bytes) -> tuple[OverlayRange, ...]:
+def load_ranges(data: bytes, provider: int) -> tuple[OverlayRange, ...]:
     ranges = []
-    for source_at, destination_at, length_at in COPY_LITERAL_TRIPLES:
-        source = read_word(data, source_at) - OSOS_LOAD_ALIAS
-        destination = read_word(data, destination_at)
-        length = read_word(data, length_at)
+    for first_literal in PROVIDER_COPY_TRIPLES[provider]:
+        source = read_word(data, first_literal) - OSOS_LOAD_ALIAS
+        destination = read_word(data, first_literal + 4)
+        length = read_word(data, first_literal + 8)
+        if length == 0:
+            continue
         if not (0 <= source < source + length <= len(data)):
             raise ValueError("overlay source lies outside the OSOS image")
         if not (IRAM_START <= destination < destination + length <= IRAM_END):
             raise ValueError("overlay destination lies outside expected IRAM")
         ranges.append(OverlayRange(source, destination, length))
     return tuple(ranges)
+
+
+def load_zero_ranges(data: bytes, provider: int) -> tuple[tuple[int, int], ...]:
+    ranges = []
+    for destination_at, length_at in PROVIDER_ZERO_PAIRS[provider]:
+        destination = read_word(data, destination_at)
+        length = read_word(data, length_at)
+        if length == 0:
+            continue
+        if not (IRAM_START <= destination < destination + length <= IRAM_END):
+            raise ValueError("BSS clear range lies outside expected IRAM")
+        ranges.append((destination, destination + length))
+    return tuple(ranges)
+
+
+def touched_intervals(data: bytes, provider: int) -> tuple[tuple[int, int], ...]:
+    intervals = [(item.destination, item.destination + item.length)
+                 for item in load_ranges(data, provider)]
+    intervals.extend(load_zero_ranges(data, provider))
+    merged: list[list[int]] = []
+    for start, end in sorted(intervals):
+        if merged and start <= merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], end)
+        else:
+            merged.append([start, end])
+    return tuple((start, end) for start, end in merged)
+
+
+def overlap_bytes(left: tuple[tuple[int, int], ...],
+                  right: tuple[tuple[int, int], ...]) -> int:
+    return sum(max(0, min(left_end, right_end) - max(left_start, right_start))
+               for left_start, left_end in left
+               for right_start, right_end in right)
 
 
 def resolve(address: int, ranges: tuple[OverlayRange, ...]) -> int | None:
@@ -71,6 +131,12 @@ def resolve(address: int, ranges: tuple[OverlayRange, ...]) -> int | None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("osos", type=Path, help="exact extracted stock OSOS")
+    parser.add_argument("--provider", type=int, choices=sorted(PROVIDER_COPY_TRIPLES),
+                        default=0, help="provider loader to inspect (default: 0)")
+    parser.add_argument("--overlap-report", action="store_true",
+                        help="show IRAM overlap for provider loaders 0 through 4")
+    parser.add_argument("--output-state", action="store_true",
+                        help="read provider-0 render-path shared-state literals")
     parser.add_argument("addresses", nargs="*", type=lambda word: int(word, 0),
                         help="IRAM runtime addresses to map back to OSOS")
     parser.add_argument("--vtable", type=lambda word: int(word, 0),
@@ -79,6 +145,8 @@ def main() -> int:
     args = parser.parse_args()
     if args.slots < 1 or args.slots > 128:
         parser.error("--slots must be between 1 and 128")
+    if args.output_state and args.provider != 0:
+        parser.error("--output-state is mapped only for provider 0")
 
     try:
         data = args.osos.read_bytes()
@@ -87,15 +155,46 @@ def main() -> int:
     actual_hash = hashlib.sha256(data).hexdigest()
     if len(data) != STOCK_OSOS_SIZE or actual_hash != STOCK_OSOS_SHA256:
         parser.error("OSOS size/SHA-256 does not match the original iPod backup")
-    ranges = load_ranges(data)
+    ranges = load_ranges(data, args.provider)
+    item_address = read_word(data, ITEM_ADDRESS_LITERALS[args.provider])
+    print(f"provider {args.provider} item address: 0x{item_address:08x} "
+          "(constructor literal; not a runtime allocation)")
+    print(f"provider {args.provider} copied ranges:")
     for item in ranges:
         print(f"OSOS+0x{item.source:x}..0x{item.source + item.length:x} "
               f"-> IRAM 0x{item.destination:08x}..0x{item.destination + item.length:08x}")
+    for start, end in load_zero_ranges(data, args.provider):
+        print(f"BSS clear IRAM 0x{start:08x}..0x{end:08x}")
+
+    if args.overlap_report:
+        provider_intervals = {number: touched_intervals(data, number)
+                              for number in PROVIDER_COPY_TRIPLES}
+        for left in sorted(provider_intervals):
+            for right in sorted(provider_intervals):
+                if right <= left:
+                    continue
+                amount = overlap_bytes(provider_intervals[left],
+                                       provider_intervals[right])
+                print(f"provider {left}/{right}: {amount} overlapping IRAM bytes")
+
+    if args.output_state:
+        for label, literals in OUTPUT_STATE_LITERALS.items():
+            values = []
+            for address in literals:
+                source = resolve(address, ranges)
+                if source is None or resolve(address + 3, ranges) != source + 3:
+                    parser.error("output-state literal is outside copied ranges")
+                values.append(read_word(data, source))
+            print(f"{label}: " + ", ".join(
+                f"[0x{address:08x}]=0x{value:08x}"
+                for address, value in zip(literals, values)
+            ) + f"; same destination={values[0] == values[1]}")
+        print("Static absolute references; independent decoding is not established.")
 
     for address in args.addresses:
         source = resolve(address, ranges)
         print(f"0x{address:08x} -> " + (f"OSOS+0x{source:x}" if source is not None
-                                     else "not in provider-0 copied ranges"))
+                                     else f"not in provider-{args.provider} copied ranges"))
 
     if args.vtable is not None:
         table_offset = resolve(args.vtable, ranges)
