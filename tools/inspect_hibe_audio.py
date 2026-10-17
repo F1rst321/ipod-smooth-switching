@@ -76,6 +76,26 @@ class Snapshot:
             cursor = position + len(needle)
 
 
+def find_pcm_provider_geometry(snapshot: Snapshot) -> list[tuple[int, int, int, int, int]]:
+    """Find aligned RAM objects matching this snapshot's PCM-provider geometry.
+
+    This is a snapshot-specific heuristic, not a general object detector.
+    Matching geometry does not prove that an object feeds music playback.
+    """
+    ram = snapshot.read(RAM_BASE, RAM_SIZE)
+    candidates: list[tuple[int, int, int, int, int]] = []
+    for offset in range(0, len(ram) - 0x38, 4):
+        channels = struct.unpack_from("<I", ram, offset + 0x24)[0]
+        block_size = struct.unpack_from("<I", ram, offset + 0x28)[0]
+        stride = struct.unpack_from("<I", ram, offset + 0x2C)[0]
+        count = struct.unpack_from("<I", ram, offset + 0x34)[0]
+        if (channels, block_size, stride, count) == (3, 0x12000, 0x4000, 32):
+            data = struct.unpack_from("<I", ram, offset + 0x20)[0]
+            descriptors = struct.unpack_from("<I", ram, offset + 0x30)[0]
+            candidates.append((RAM_BASE + offset, data, descriptors, block_size, count))
+    return candidates
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("image", type=Path, help="read-only firmware partition backup")
@@ -126,6 +146,101 @@ def main() -> int:
                   f"vtable offset 0x{snapshot.u32(fsbuf):08x}")
     else:
         print("  item body is outside the RAM captured by HIBE")
+
+    # The OSOS startup object named RMIprimary links to this TPCMQUEUE.
+    # Confirm the relationship in the saved RAM instead of relying only on
+    # the static constructor's global addresses.
+    primary_task = 0x1093733C
+    if snapshot.u32(primary_task) == 0x00666348:
+        primary_queue_alias = snapshot.u32(primary_task + 0x4C)
+        primary_queue = snapshot.native_ram_address(primary_queue_alias)
+        print(f"RMIprimary task RAM 0x{primary_task:08x}; "
+              f"vtable offset 0x{snapshot.u32(primary_task):08x}; "
+              f"+0x4c TPCMQUEUE 0x{primary_queue_alias:08x} "
+              f"(native 0x{primary_queue:08x})")
+        if primary_queue != queue:
+            print("  RMIprimary queue pointer differs from the inspected TPCMQUEUE")
+    else:
+        print(f"RMIprimary task object not confirmed at RAM 0x{primary_task:08x}")
+
+    # TPCMQUEUE's provider is separate from the file wrapper.  Its descriptor
+    # array points into a preallocated buffer region.  Report descriptor and
+    # sample statistics as observations only: a static RAM snapshot cannot
+    # establish the upstream decoder or prove a second track was active.
+    provider_alias = snapshot.u32(queue + 0x5C)
+    provider = snapshot.native_ram_address(provider_alias)
+    print(f"TPCMQUEUE provider pointer: 0x{provider_alias:08x} "
+          f"(native alias 0x{provider:08x})")
+    if RAM_BASE <= provider < RAM_BASE + RAM_SIZE:
+        data_alias = snapshot.u32(provider + 0x20)
+        data_base = snapshot.native_ram_address(data_alias)
+        geometry = tuple(snapshot.u32(provider + offset)
+                         for offset in (0x24, 0x28, 0x2C))
+        descriptor_alias = snapshot.u32(provider + 0x30)
+        descriptors = snapshot.native_ram_address(descriptor_alias)
+        descriptor_count = snapshot.u32(provider + 0x34)
+        print(f"  buffer base 0x{data_alias:08x} (native 0x{data_base:08x}); "
+              f"provider fields +0x24/+0x28/+0x2c="
+              f"{geometry[0]}/0x{geometry[1]:x}/0x{geometry[2]:x}")
+        print(f"  descriptor table 0x{descriptor_alias:08x} "
+              f"(native 0x{descriptors:08x}); capacity={descriptor_count}")
+        if 0 < descriptor_count <= 256 and RAM_BASE <= descriptors < RAM_BASE + RAM_SIZE:
+            active: list[tuple[int, int, int, int]] = []
+            for index in range(descriptor_count):
+                entry = descriptors + index * 0x1C
+                address_alias = snapshot.u32(entry)
+                length = snapshot.u32(entry + 4)
+                state = snapshot.u32(entry + 0x10)
+                if address_alias and length:
+                    address = snapshot.native_ram_address(address_alias)
+                    active.append((index, address, length, state))
+            print(f"  populated descriptors: {len(active)}/{descriptor_count}")
+            payload = bytearray()
+            valid = 0
+            for index, address, length, state in active:
+                if length > 0x20000:
+                    print(f"    descriptor {index}: unreasonable length 0x{length:x}; skipped")
+                    continue
+                try:
+                    block = snapshot.read(address, length)
+                except ValueError:
+                    print(f"    descriptor {index}: data outside captured RAM; skipped")
+                    continue
+                valid += 1
+                payload.extend(block)
+                if index == active[0][0]:
+                    sample_bytes = block[:len(block) & ~1]
+                    samples = struct.unpack(f"<{len(sample_bytes) // 2}h", sample_bytes)
+                    print(f"    first descriptor {index}: RAM 0x{address:08x}, "
+                          f"length=0x{length:x}, state={state}, "
+                          f"nonzero={sum(byte != 0 for byte in block)}/{len(block)}, "
+                          f"int16 min/max={min(samples)}/{max(samples)}, "
+                          f"SHA-256 {hashlib.sha256(block).hexdigest()}")
+            if valid:
+                samples = struct.unpack(f"<{len(payload) // 2}h", payload[:len(payload) & ~1])
+                nonzero = sum(byte != 0 for byte in payload)
+                strides = sorted({active[i + 1][1] - active[i][1]
+                                  for i in range(len(active) - 1)})
+                lengths = sorted({item[2] for item in active})
+                states = sorted({item[3] for item in active})
+                print(f"  captured descriptor payload: {valid} blocks, "
+                      f"lengths={','.join(f'0x{x:x}' for x in lengths)}, "
+                      f"states={states}, address strides="
+                      f"{','.join(f'0x{x:x}' for x in strides) or 'n/a'}")
+                print(f"  payload bytes={len(payload)}; nonzero={nonzero}; "
+                      f"SHA-256 {hashlib.sha256(payload).hexdigest()}")
+                print(f"  int16 view (diagnostic only): min={min(samples)}, "
+                      f"max={max(samples)}, unique={len(set(samples))}")
+    else:
+        print("  provider body is outside the RAM captured by HIBE")
+
+    provider_candidates = find_pcm_provider_geometry(snapshot)
+    print("PCM-provider geometry candidates across captured RAM: "
+          f"{len(provider_candidates)}")
+    for address, data, descriptors, block_size, capacity in provider_candidates:
+        print(f"  RAM 0x{address:08x}: data=0x{data:08x}, "
+              f"descriptors=0x{descriptors:08x}, block=0x{block_size:x}, "
+              f"capacity={capacity}")
 
     for name, vtable in (
         ("playback wrapper", 0x00666284),

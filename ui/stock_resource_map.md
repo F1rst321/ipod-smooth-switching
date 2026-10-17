@@ -76,6 +76,13 @@ event `0x09` is a Click Wheel step, that this control edits a numeric setting,
 or that it is used by the Settings rows above. The exact wheel-to-view event
 mapping and a value-writing control remain unconfirmed.
 
+Read-only decompilation of `+0x16bd34` and `+0x16c0f4` narrows this further:
+the helper updates the control-local index and calls refresh/layout helpers;
+neither reads the Settings property getter nor writes the settings setter.
+That control can animate a selection, but its presence alone would not persist
+the crossfade duration. The functions and the `+0x16c328` caller were dumped
+with `DumpRetailFunctions.java`; local output is ignored under `build/`.
+
 The settings-object vtable at `0x66c94c/0x66c950` contains code offsets
 `0x190b00/0x1919d8` (get/set). In the getter, `0x190d90..0x190da4`
 compares a property key to **`0x604f`** and reads `[settings_object+0x84]` on
@@ -134,16 +141,57 @@ The result narrows the UI investigation: a future patch can inspect resource
 IDs at this boundary and provide a replacement view or menu through an added
 provider, if that provider can be safely installed. It does not by itself add
 a nineteenth Settings row, create a Click Wheel slider, or persist its value.
-The precise event dispatcher and a noncolliding preference field remain
-unresolved, so this discovery is not enough to build or install the requested
-screen.
+The precise event dispatcher remains unresolved. A serialized byte at
+`preferences+0xb70` is now a storage candidate, but computed access paths and
+the live preference file have not been ruled out; the property getter/setter
+still do not recognize a crossfade setting. This discovery is not enough to
+build or install the requested screen.
 
 The writer at `0x0bbdf8` loads the literal length `0xb6c` (2924 bytes),
 allocates that many bytes via `0x0a8178`, and copies the current preferences
 area through `0x0a8098` before the file write at `0x0bbed4`. The connected
 device's existing `Preferences` file is also exactly 2924 bytes; it was read
-without modification. This supports a fixed-size serialization path, but does
-not identify any unused field where a new duration could safely live.
+without modification. This supports a fixed-size serialization path. A separate
+structure sweep below identified one candidate byte within the serialized data;
+it remains unverified against a live Preferences file.
+
+### Candidate persisted byte from the preference-structure sweep
+
+The settings update path `OSOS+0x0af698` reads the preferences-format version
+from object offset `+0x08`; for versions below `0x39`, it initializes bytes
+`+0xb6f`, `+0xb70`, and `+0xb71` to zero. Its normal-format initializer
+`+0x0f3dc0` also initializes neighboring fields. The writer copies
+`[preferences+0x08, preferences+0xb74)`, so `+0xb70` is inside the existing
+2924-byte on-disk file. A read-only Ghidra sweep of analyzed RetailOS
+instructions found the `+0xb70` preference-object access only in that old-file
+initialization path; the other same-immediate hit is `+0xb70` in the unrelated
+playback object at `+0x249390`. This makes byte `+0xb70` a **candidate** for a
+3–10 value without growing `Preferences`, and older preference versions would
+start at zero. It has not been written or checked against a live Preferences
+file, and the `0x6089` property/getter/setter behavior is not implemented.
+
+The getter and setter also have empty switch cases for keys `0x6089`–`0x608c`;
+the resource menu scan found no row using those low-word keys. `0x6089` is a
+candidate property ID to investigate for the new row, not a supported setting:
+the current empty branches do not read or write `preferences+0xb70`, and other
+runtime consumers of those IDs have not been ruled out.
+
+The reproducible immediate scan is in
+[`FindRetailOffsetUses.java`](../tools/ghidra/FindRetailOffsetUses.java); its
+output is local under ignored `build/`. The scan covers analyzed instructions
+and direct scalar operands, so computed or dynamically selected accesses still
+need to be excluded before treating this byte as reserved.
+
+### Candidate tail space in the exact OSOS
+
+Two zero-filled tail ranges were scanned in the exact OSOS: `0x733c98..0x7358c0`
+(`0x1c28` bytes) and `0x7358c4..0x736000` (`0x73c` bytes). Ghidra found no
+analyzed function start or direct reference into either range. The larger range
+could hold relocated UI resources; the smaller could hold short ARM stubs.
+These are only placement candidates: computed pointers, boot-time accesses,
+checksums, and actual execution from either range have not been ruled out or
+validated. No bytes have been written. The read-only scan is reproducible with
+[`FindRetailRangeReferences.java`](../tools/ghidra/FindRetailRangeReferences.java).
 
 ## What cannot yet be patched correctly
 
@@ -162,9 +210,10 @@ To build an independent stock-style slider, the remaining work is specific:
    Brightness Click Wheel event handler; prove which callback receives each
    wheel step, Select, and MENU. Its 3–10 clamp and on-screen numeric display
    must be implemented without affecting the stock controls.
-2. Allocate a new property key and backing value, add guarded get/set paths,
-   and trace the `Preferences` serialization format so the new value survives
-   a reboot without changing any current setting or corrupting old files.
+2. Verify that candidate byte `preferences+0xb70` is unused by all current and
+   computed access paths; select a noncolliding property key and add guarded
+   get/set paths so the value survives a reboot without changing any current
+   setting or corrupting old files.
 3. Rebuild the Settings menu with a nineteenth row, add localized strings and
    a new View for the horizontal track, moving circular knob, and compact
    seconds label. Update every affected resource record and checksum in an
@@ -172,8 +221,9 @@ To build an independent stock-style slider, the remaining work is specific:
 4. Connect that value to the yet-to-be-implemented two-track PCM mixer and
    validate navigation, persistence, playback, and reboot on target hardware.
 
-No source-backed wheel callback or free preferences slot has been established
-yet. There is no UI patch to install.
+No source-backed wheel callback has been established. `preferences+0xb70` is a
+candidate persisted byte, not yet proven free across dynamic accesses or a live
+file. There is no UI patch to install.
 
 Reproduction examples:
 
