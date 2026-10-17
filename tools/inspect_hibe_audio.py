@@ -76,6 +76,31 @@ class Snapshot:
             cursor = position + len(needle)
 
 
+def inspect_mp3_sync(snapshot: Snapshot) -> None:
+    """Follow provider-0's fixed sync pointer in this saved RAM state.
+
+    Queue capacity and two output slots describe frame scheduling. They do
+    not establish two independent tracks or prove that any PCM was played.
+    Resolve uncached aliases at each pointer dereference, since the callback
+    vtable itself is in RAM rather than an image-relative OSOS table.
+    """
+    queue = snapshot.native_ram_address(0x149EE078)
+    name = snapshot.read(queue + 0x1C, 12).split(b"\0", 1)[0]
+    print(f"Provider-0 saved sync name: {name.decode('ascii', errors='replace')!r}")
+    print(f"  RAM 0x{queue:08x}; slots={snapshot.u32(queue + 0x40)}, "
+          f"submitted={snapshot.u32(queue + 0x78)}, "
+          f"completed={snapshot.u32(queue + 0x7C)}")
+    callback = snapshot.native_ram_address(snapshot.u32(queue + 0x44))
+    table = snapshot.native_ram_address(snapshot.u32(callback))
+    print(f"  callback RAM 0x{callback:08x}; vtable RAM 0x{table:08x}")
+    for slot in (0x04, 0x0C, 0x1C, 0x20):
+        print(f"    method +0x{slot:02x}: 0x{snapshot.u32(table + slot):08x}")
+    for field in (0x04, 0x08, 0x0C, 0x10, 0x14):
+        print(f"    callback field +0x{field:02x}: "
+              f"0x{snapshot.u32(callback + field):08x}")
+    print("  Saved state only; slot count is not a music-stream count.")
+
+
 def find_pcm_provider_geometry(snapshot: Snapshot) -> list[tuple[int, int, int, int, int]]:
     """Find aligned RAM objects matching this snapshot's PCM-provider geometry.
 
@@ -360,6 +385,7 @@ def main() -> int:
                 nonzero = sum(byte != 0 for byte in block)
                 print(f"  DMA slot 0x{slot:08x} (native 0x{native_slot:08x}): "
                       f"{nonzero}/{len(block)} nonzero bytes")
+    inspect_mp3_sync(snapshot)
     print("These are saved RAM pointers/state only; the script does not access the device.")
     return 0
 
