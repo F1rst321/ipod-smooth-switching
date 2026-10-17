@@ -6,7 +6,8 @@ import argparse
 from pathlib import Path
 
 
-def find_matches(data: bytes, needle: bytes) -> list[int]:
+def find_matches(data: bytes, needle: bytes, limit: int = 2) -> list[int]:
+    """Find enough matches to distinguish a unique source from ambiguity."""
     matches: list[int] = []
     cursor = 0
     while True:
@@ -14,6 +15,8 @@ def find_matches(data: bytes, needle: bytes) -> list[int]:
         if offset < 0:
             return matches
         matches.append(offset)
+        if len(matches) >= limit:
+            return matches
         cursor = offset + 1
 
 
@@ -44,12 +47,18 @@ def main() -> int:
             failed = True
             continue
         window = iram[offset:offset + args.window]
+        if not any(window):
+            print(f"0x{address:08x}: captured IRAM is zero-filled; "
+                  "no loaded routine to map")
+            failed = True
+            continue
         matches = find_matches(osos, window)
         if len(matches) == 1:
             print(f"0x{address:08x} -> OSOS+0x{matches[0]:x} ({args.window} bytes)")
         elif matches:
             joined = ", ".join(f"0x{match:x}" for match in matches)
-            print(f"0x{address:08x}: ambiguous OSOS matches at {joined}")
+            print(f"0x{address:08x}: at least two OSOS matches ({joined}); "
+                  "source is ambiguous")
             failed = True
         else:
             print(f"0x{address:08x}: no exact {args.window}-byte OSOS match")

@@ -96,6 +96,49 @@ def find_pcm_provider_geometry(snapshot: Snapshot) -> list[tuple[int, int, int, 
     return candidates
 
 
+def inspect_audio_provider_registry(snapshot: Snapshot) -> None:
+    """Print saved provider objects selected by the audio worker.
+
+    The list is an observed object registry, not proof that each entry is a
+    music codec or that multiple entries can decode songs concurrently.
+    """
+    player = 0x10939F60
+    table_word = snapshot.u32(player + 0x0C)
+    table = (RAM_BASE + table_word if table_word < OSOS_SIZE
+             else snapshot.native_ram_address(table_word))
+    selected = snapshot.u32(player + 0x10)
+    print(f"Audio worker RAM 0x{player:08x}; provider table "
+          f"0x{table_word:08x} (RAM 0x{table:08x}); selected={selected}")
+    if not RAM_BASE <= table < RAM_BASE + RAM_SIZE - 8 * 4:
+        print("  provider table is outside captured RAM")
+        return
+
+    for index in range(8):
+        provider_alias = snapshot.u32(table + index * 4)
+        if provider_alias == 0:
+            break
+        provider = snapshot.native_ram_address(provider_alias)
+        if not RAM_BASE <= provider < RAM_BASE + RAM_SIZE - 12:
+            print(f"  provider {index}: object 0x{provider_alias:08x} "
+                  "outside captured RAM")
+            continue
+        vtable_word = snapshot.u32(provider)
+        vtable = (RAM_BASE + vtable_word if vtable_word < OSOS_SIZE
+                  else snapshot.native_ram_address(vtable_word))
+        if RAM_BASE <= vtable < RAM_BASE + RAM_SIZE - 16:
+            matcher = snapshot.u32(vtable)
+            constructor = snapshot.u32(vtable + 4)
+            print(f"  provider {index}: object 0x{provider_alias:08x}, "
+                  f"vtable 0x{vtable_word:08x}, "
+                  f"type-match method 0x{matcher:08x}, "
+                  f"create method 0x{constructor:08x}, "
+                  f"saved index/state={snapshot.u32(provider + 4)}/"
+                  f"{snapshot.u32(provider + 8)}")
+        else:
+            print(f"  provider {index}: vtable 0x{vtable_word:08x} "
+                  "outside captured RAM")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("image", type=Path, help="read-only firmware partition backup")
@@ -163,12 +206,16 @@ def main() -> int:
     else:
         print(f"RMIprimary task object not confirmed at RAM 0x{primary_task:08x}")
 
+    inspect_audio_provider_registry(snapshot)
+
     # TPCMQUEUE's provider is separate from the file wrapper.  Its descriptor
     # array points into a preallocated buffer region.  Report descriptor and
     # sample statistics as observations only: a static RAM snapshot cannot
     # establish the upstream decoder or prove a second track was active.
     provider_alias = snapshot.u32(queue + 0x5C)
     provider = snapshot.native_ram_address(provider_alias)
+    print(f"TPCMQUEUE mode +0x65={snapshot.read(queue + 0x65, 1)[0]}; "
+          f"worker gate +0xc8={snapshot.read(queue + 0xC8, 1)[0]}")
     print(f"TPCMQUEUE provider pointer: 0x{provider_alias:08x} "
           f"(native alias 0x{provider:08x})")
     if RAM_BASE <= provider < RAM_BASE + RAM_SIZE:
@@ -185,19 +232,28 @@ def main() -> int:
         print(f"  descriptor table 0x{descriptor_alias:08x} "
               f"(native 0x{descriptors:08x}); capacity={descriptor_count}")
         if 0 < descriptor_count <= 256 and RAM_BASE <= descriptors < RAM_BASE + RAM_SIZE:
-            active: list[tuple[int, int, int, int]] = []
+            allocated: list[tuple[int, int, int, int]] = []
+            states_by_count: dict[int, int] = {}
             for index in range(descriptor_count):
                 entry = descriptors + index * 0x1C
                 address_alias = snapshot.u32(entry)
                 length = snapshot.u32(entry + 4)
                 state = snapshot.u32(entry + 0x10)
+                states_by_count[state] = states_by_count.get(state, 0) + 1
                 if address_alias and length:
                     address = snapshot.native_ram_address(address_alias)
-                    active.append((index, address, length, state))
-            print(f"  populated descriptors: {len(active)}/{descriptor_count}")
+                    allocated.append((index, address, length, state))
+            print(f"  descriptor states: {dict(sorted(states_by_count.items()))}; "
+                  f"allocated buffers: {len(allocated)}/{descriptor_count}")
+            # The exact IRAM consumer used in mode 0 acquires state 8. State 3
+            # can be acquired on the producer side and does not prove that the
+            # buffer currently holds valid, unread audio samples.
+            if snapshot.read(queue + 0x65, 1)[0] == 0:
+                print(f"  mode-0 consumer-ready (state 8): "
+                      f"{states_by_count.get(8, 0)}")
             payload = bytearray()
             valid = 0
-            for index, address, length, state in active:
+            for index, address, length, state in allocated:
                 if length > 0x20000:
                     print(f"    descriptor {index}: unreasonable length 0x{length:x}; skipped")
                     continue
@@ -208,7 +264,7 @@ def main() -> int:
                     continue
                 valid += 1
                 payload.extend(block)
-                if index == active[0][0]:
+                if index == allocated[0][0]:
                     sample_bytes = block[:len(block) & ~1]
                     samples = struct.unpack(f"<{len(sample_bytes) // 2}h", sample_bytes)
                     print(f"    first descriptor {index}: RAM 0x{address:08x}, "
@@ -219,11 +275,12 @@ def main() -> int:
             if valid:
                 samples = struct.unpack(f"<{len(payload) // 2}h", payload[:len(payload) & ~1])
                 nonzero = sum(byte != 0 for byte in payload)
-                strides = sorted({active[i + 1][1] - active[i][1]
-                                  for i in range(len(active) - 1)})
-                lengths = sorted({item[2] for item in active})
-                states = sorted({item[3] for item in active})
-                print(f"  captured descriptor payload: {valid} blocks, "
+                strides = sorted({allocated[i + 1][1] - allocated[i][1]
+                                  for i in range(len(allocated) - 1)})
+                lengths = sorted({item[2] for item in allocated})
+                states = sorted({item[3] for item in allocated})
+                print(f"  allocated descriptor payload (may be stale): "
+                      f"{valid} blocks, "
                       f"lengths={','.join(f'0x{x:x}' for x in lengths)}, "
                       f"states={states}, address strides="
                       f"{','.join(f'0x{x:x}' for x in strides) or 'n/a'}")
