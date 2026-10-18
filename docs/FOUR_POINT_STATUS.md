@@ -1007,9 +1007,11 @@ stream subobject-ы именно по этой формуле. A→B→A MP3-wor
 
 
 Скан прямых ARM `BL/BLX-immediate` нашёл вызов `FUN_1024b5bc` из
-`FUN_1025e148` (`RMIprimary`, `OSOS+0x25e2c0`), но прямых ARM-вызовов
-`FUN_101a8ff8` не обнаружено. Косвенный dispatch скан не исключает. `FSbuf`
-используется при создании `TPCMQUEUE` и не идентифицирует источник. Поэтому
+`FUN_1025e148` (`RMIprimary`, `OSOS+0x25e2c0`). Конструктор `FUN_10216b4c`
+имеет два прямых call site: `+0x23fbec` из `FUN_1023f8dc` (PCM queue) и
+`+0x24b6f8` из `FUN_1024b5bc` (RMIprimary). Это общий FSbuf интерфейс; он не
+определяет MP3 source. Прямых ARM-вызовов `FUN_101a8ff8` нет, но косвенный
+dispatch или код другого компонента этим сканом не исключается. Поэтому
 исходный MP3 parent и file handle для B ещё не обнаружены; A→B→A эмуляция
 использует mock parent-ы, file callbacks и чтение. Скан воспроизводится
 `tools/scan_arm_direct_calls.py` и не охватывает Thumb или косвенные вызовы.
