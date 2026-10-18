@@ -22,6 +22,7 @@ TRACK_RESOURCE_BYTES = 700
 MP3_SYNC_OBJECT_MIN_BYTES = 0xA4
 MP3_SYNC_WORKER_STACK_BYTES = 0x700
 PLAYER_CONTEXT_PREFIX_BYTES = 0x29E0
+PCM_RING_HEADER_BYTES = 20
 IDLE_HIBE_LARGEST_FREE_BLOCK_BYTES = 4_641_944
 
 
@@ -53,9 +54,11 @@ def main() -> int:
     b_private_state_bytes = known_decoder_state_bytes + PROVIDER0_WORKSPACE_BYTES
     b_sync_control_bytes = MP3_SYNC_OBJECT_MIN_BYTES + MP3_SYNC_WORKER_STACK_BYTES
     queued_pcm_bytes = args.queued_blocks * block_bytes
+    ring_overhead_bytes = PCM_RING_HEADER_BYTES + bytes_per_frame
+    ring_storage_bytes = queued_pcm_bytes + ring_overhead_bytes
     descriptor_bytes = args.queued_blocks * VOICE_DESCRIPTOR_MIN_BYTES
     streaming_subtotal = (b_private_state_bytes + TRACK_RESOURCE_BYTES
-                          + queued_pcm_bytes + descriptor_bytes
+                          + ring_storage_bytes + descriptor_bytes
                           + b_sync_control_bytes)
     queued_seconds = args.queued_blocks * args.block_frames / args.sample_rate
     print(f"PCM format: {args.sample_rate} Hz, {args.channels} channels, "
@@ -70,7 +73,8 @@ def main() -> int:
           f"0x{MP3_SYNC_WORKER_STACK_BYTES:x} = "
           f"{MP3_SYNC_WORKER_STACK_BYTES:,} bytes")
     print(f"Streaming queue candidate: {args.queued_blocks} B blocks = "
-          f"{queued_pcm_bytes:,} PCM bytes ({queued_seconds:.3f} s of queued audio)")
+          f"{queued_pcm_bytes:,} PCM bytes + {ring_overhead_bytes} ring bytes "
+          f"= {ring_storage_bytes:,} total ({queued_seconds:.3f} s of queued audio)")
     print(f"Minimum descriptor extent: {VOICE_DESCRIPTOR_MIN_BYTES} bytes each "
           f"= {descriptor_bytes:,} bytes; candidate streaming budget: "
           f"{streaming_subtotal:,} bytes with the isolated-workspace candidate")

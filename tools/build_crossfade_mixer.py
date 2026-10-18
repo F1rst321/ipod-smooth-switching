@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Cross-compile the isolated PCM16 mixer for the iPod Video ARM7TDMI.
+"""Cross-compile the isolated PCM16 mixer and ring for the iPod Video ARM7TDMI.
 
 This creates an offline code payload under build/. It does not connect to a
 device, inject hooks, update the firmware directory, or create an installable
@@ -15,6 +15,7 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SOURCE = PROJECT_ROOT / "src" / "crossfade_mixer.c"
+RING_SOURCE = PROJECT_ROOT / "src" / "crossfade_pcm_ring.c"
 LINKER_SCRIPT = PROJECT_ROOT / "src" / "crossfade_mixer.lds"
 DEFAULT_TOOLCHAIN = (
     PROJECT_ROOT / "build" / "toolchains" / "arm-gnu-14.3" / "unpacked" / "bin"
@@ -76,6 +77,7 @@ def main() -> int:
 
     output_dir.mkdir(parents=True, exist_ok=True)
     obj = output_dir / "crossfade_mixer.o"
+    ring_obj = output_dir / "crossfade_pcm_ring.o"
     elf = output_dir / "crossfade_mixer.elf"
     binary = output_dir / "crossfade_mixer.bin"
     map_file = output_dir / "crossfade_mixer.map"
@@ -116,6 +118,20 @@ def main() -> int:
         run(
             [
                 str(gcc),
+                *flags,
+                "-I",
+                str(RING_SOURCE.parent),
+                "-c",
+                str(RING_SOURCE),
+                "-o",
+                str(ring_obj),
+            ],
+            output_dir,
+            log,
+        )
+        run(
+            [
+                str(gcc),
                 "-mcpu=arm7tdmi",
                 "-mthumb-interwork",
                 "-mthumb",
@@ -124,6 +140,7 @@ def main() -> int:
                 f"-Wl,-T,{LINKER_SCRIPT}",
                 f"-Wl,-Map,{map_file}",
                 str(obj),
+                str(ring_obj),
                 "-lgcc",
                 "-o",
                 str(elf),
@@ -152,7 +169,7 @@ def main() -> int:
     print(f"Compiler: {version}")
     print(f"Target: ARM7TDMI / ARMv4T Thumb")
     print(f"Payload: {binary} ({payload_size:,}/{OSOS_WINDOW_BYTES:,} bytes)")
-    print("Isolated mixer code only; no audio hook or installable firmware image was built.")
+    print("Isolated mixer and PCM ring only; no audio hook or installable firmware image was built.")
     return 0
 
 

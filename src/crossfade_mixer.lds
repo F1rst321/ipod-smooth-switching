@@ -8,6 +8,11 @@ SECTIONS
     .text : ALIGN(4) {
         KEEP(*(.text.ipod_crossfade_begin))
         KEEP(*(.text.ipod_crossfade_mix_block))
+        KEEP(*(.text.ipod_crossfade_pcm_ring_storage_bytes))
+        KEEP(*(.text.ipod_crossfade_pcm_ring_init))
+        KEEP(*(.text.ipod_crossfade_pcm_ring_available))
+        KEEP(*(.text.ipod_crossfade_pcm_ring_write))
+        KEEP(*(.text.ipod_crossfade_pcm_ring_read))
         *(.text .text.*)
         *(.rodata .rodata.*)
         *(.ARM.extab* .gnu.linkonce.armextab.*)

@@ -28,6 +28,9 @@ STATE_ADDRESS = RAM_BASE + 0x1000
 A_ADDRESS = RAM_BASE + 0x2000
 B_ADDRESS = RAM_BASE + 0x4000
 OUT_ADDRESS = RAM_BASE + 0x6000
+RING_STORAGE_ADDRESS = RAM_BASE + 0x8000
+RING_INPUT_ADDRESS = RAM_BASE + 0x9000
+RING_OUTPUT_ADDRESS = RAM_BASE + 0xA000
 STACK_ADDRESS = RAM_BASE + 0x1F000
 RETURN_ADDRESS = RAM_BASE + 0x1FFF0
 Q15_ONE = 32768
@@ -46,9 +49,17 @@ def load_symbols(nm: Path, elf: Path) -> dict[str, int]:
         match = re.match(r"^([0-9a-fA-F]+)\s+[A-Za-z]\s+(ipod_crossfade_\w+)$", line)
         if match:
             symbols[match.group(2)] = int(match.group(1), 16)
-    required = {"ipod_crossfade_begin", "ipod_crossfade_mix_block"}
+    required = {
+        "ipod_crossfade_begin",
+        "ipod_crossfade_mix_block",
+        "ipod_crossfade_pcm_ring_storage_bytes",
+        "ipod_crossfade_pcm_ring_init",
+        "ipod_crossfade_pcm_ring_available",
+        "ipod_crossfade_pcm_ring_write",
+        "ipod_crossfade_pcm_ring_read",
+    }
     if not required.issubset(symbols):
-        raise ValueError(f"ELF is missing mixer entry points: {required - symbols.keys()}")
+        raise ValueError(f"ELF is missing payload entry points: {required - symbols.keys()}")
     return symbols
 
 
@@ -199,10 +210,90 @@ def verify(build_dir: Path, toolchain_bin: Path) -> None:
         (4, 1),
     ) == 2
     assert read_samples(emulator, OUT_ADDRESS, 2) == [200, -200]
+
+    # The four-block stereo ring reserves one sentinel frame and wrap-tests
+    # both read and write cursors without allocating from the audio callback.
+    assert emulator.call(
+        "ipod_crossfade_pcm_ring_storage_bytes",
+        (2, 2, 2),
+    ) == 40
+    assert emulator.call(
+        "ipod_crossfade_pcm_ring_storage_bytes",
+        (2, 1152, 4),
+    ) == 18456
+    assert emulator.call(
+        "ipod_crossfade_pcm_ring_storage_bytes",
+        (3, 2, 2),
+    ) == 0
+    assert emulator.call(
+        "ipod_crossfade_pcm_ring_storage_bytes",
+        (2, 0xFFFFFFFF, 1),
+    ) == 0
+    assert emulator.call(
+        "ipod_crossfade_pcm_ring_init",
+        (RING_STORAGE_ADDRESS, 39, 2, 2),
+        (2,),
+    ) == 0
+    assert emulator.call(
+        "ipod_crossfade_pcm_ring_init",
+        (RING_STORAGE_ADDRESS + 1, 40, 2, 2),
+        (2,),
+    ) == 0
+    assert emulator.call(
+        "ipod_crossfade_pcm_ring_init",
+        (RING_STORAGE_ADDRESS, 40, 2, 2),
+        (2,),
+    ) == RING_STORAGE_ADDRESS
+    emulator.uc.mem_write(
+        RING_INPUT_ADDRESS,
+        struct.pack("<6h", 1, 2, 3, 4, 5, 6),
+    )
+    assert emulator.call(
+        "ipod_crossfade_pcm_ring_write",
+        (RING_STORAGE_ADDRESS, RING_INPUT_ADDRESS, 3),
+    ) == 3
+    assert emulator.call("ipod_crossfade_pcm_ring_available", (RING_STORAGE_ADDRESS,)) == 3
+    assert emulator.call(
+        "ipod_crossfade_pcm_ring_read",
+        (RING_STORAGE_ADDRESS, RING_OUTPUT_ADDRESS, 2),
+    ) == 2
+    assert read_samples(emulator, RING_OUTPUT_ADDRESS, 4) == [1, 2, 3, 4]
+
+    emulator.uc.mem_write(
+        RING_INPUT_ADDRESS,
+        struct.pack("<6h", 7, 8, 9, 10, 11, 12),
+    )
+    assert emulator.call(
+        "ipod_crossfade_pcm_ring_write",
+        (RING_STORAGE_ADDRESS, RING_INPUT_ADDRESS, 4),
+    ) == 3
+    assert emulator.call("ipod_crossfade_pcm_ring_available", (RING_STORAGE_ADDRESS,)) == 4
+    assert emulator.call(
+        "ipod_crossfade_pcm_ring_read",
+        (RING_STORAGE_ADDRESS, RING_OUTPUT_ADDRESS, 4),
+    ) == 4
+    assert read_samples(emulator, RING_OUTPUT_ADDRESS, 8) == [5, 6, 7, 8, 9, 10, 11, 12]
+
+    assert emulator.call(
+        "ipod_crossfade_pcm_ring_write",
+        (RING_STORAGE_ADDRESS, RING_INPUT_ADDRESS, 4),
+    ) == 4
+    assert emulator.call(
+        "ipod_crossfade_pcm_ring_write",
+        (RING_STORAGE_ADDRESS, RING_INPUT_ADDRESS, 1),
+    ) == 0
+    assert emulator.call(
+        "ipod_crossfade_pcm_ring_read",
+        (RING_STORAGE_ADDRESS, RING_OUTPUT_ADDRESS, 4),
+    ) == 4
+    assert emulator.call("ipod_crossfade_pcm_ring_available", (RING_STORAGE_ADDRESS,)) == 0
+
     print("PASS: 5-frame stereo fade persists correctly across blocks")
     print("PASS: odd-length ramp reaches exact endpoints and supports in-place output")
     print("PASS: invalid channel count is rejected without advancing state")
     print("PASS: one-frame fade is rejected and oversized block is clipped")
+    print("PASS: PCM ring validates runtime allocation size and rejects invalid geometry")
+    print("PASS: PCM ring wraps read/write cursors and reports full/empty states")
 
 
 def main() -> int:
