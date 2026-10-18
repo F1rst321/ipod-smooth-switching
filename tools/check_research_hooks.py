@@ -15,6 +15,11 @@ HOOKS = {
     "resource lookup": (0x21F254, bytes.fromhex("f8 40 2d e9 01 50 a0 e1 00 10 a0 e3")),
     "list-row label draw": (0x1BB260, bytes.fromhex("f7 4f 2d e9 30 d0 4d e2 00 40 a0 e1")),
     "general label draw": (0x244924, bytes.fromhex("30 40 2d e9 01 e0 a0 e1 00 40 a0 e1")),
+    # This sequence includes the BL at OSOS+0x1d606c to the stock voice mixer.
+    "PCM callback to voice mixer": (
+        0x1D6064,
+        bytes.fromhex("24 21 a0 e1 05 10 a0 e1 11 07 01 eb 38 80 bd e8"),
+    ),
 }
 
 

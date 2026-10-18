@@ -66,7 +66,7 @@ This creates a linear crossfade of 3–10 seconds without modifying either input
 
 The requested click-wheel settings screen is documented in [`docs/UI_CONCEPT.md`](docs/UI_CONCEPT.md); the visual mockup is [`docs/mockups/crossfade-wheel-settings.png`](docs/mockups/crossfade-wheel-settings.png). It is a design preview, not a firmware screenshot.
 
-Check that known RetailOS 1.3 UI hook signatures still match the input image:
+Check that known RetailOS 1.3 UI and PCM hook signatures still match the input image:
 
 ```powershell
 py .\tools\check_research_hooks.py .\firmware\iPod_25.1.3.ipsw
@@ -147,4 +147,4 @@ Firmware images and device backups stay under `firmware/`, which Git ignores; on
 
 ## What is ready
 
-The project currently contains the UI concept, read-only backup and firmware inspection tools (including an HIBE heap free-list audit), a component-level comparison of the stock device backup against Apple's IPSW, a verified computer-side WAV crossfade prototype, and a structurally checked offline image builder. The visual is a mockup only. No crossfade code has been inserted into RetailOS, and there is no installable firmware image yet: the music PCM mixing point and the stock menu/settings integration have not been identified and validated. The image builder cannot establish audio or UI behavior.
+The project currently contains the UI concept, read-only backup and firmware inspection tools (including an HIBE heap free-list audit), a component-level comparison of the stock device backup against Apple's IPSW, a verified computer-side WAV crossfade prototype, and a structurally checked offline image builder. The visual is a mockup only. No crossfade code has been inserted into RetailOS, and there is no installable firmware image yet: a stock PCM mixing primitive and candidate hook are mapped, but the next-track PCM producer and stock menu/settings integration have not been implemented and validated. The image builder cannot establish audio or UI behavior.
