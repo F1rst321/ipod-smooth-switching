@@ -9,9 +9,17 @@ cursor и cache находятся у переданного FSbuf. Значит
 второй owner. В конструкторе размер буфера делится на chunks по `0x8000`, поэтому
 один 32-КиБ chunk можно оценить как минимальный B backing candidate: с текущими
 допущениями streaming subtotal с parent-кандидатом составил 126 332 байта.
-Создание второго owner, реальное B чтение и playback heap пока не проверены; это
-не установочная прошивка. `tools/crossfade_memory_budget.py` принимает
+Конструктор owner/FSbuf проходит в эмуляции; его runtime lifecycle, реальное B
+чтение и playback heap пока не проверены; это не установочная прошивка.
+`tools/crossfade_memory_budget.py` принимает
 `--fsbuf-backing-bytes 32768`; исходный OSOS и резервная копия не менялись.
+
+Новым read-only Unicorn прогоном вызваны штатные allocator и конструктор
+`FUN_1024b5bc` поверх копии сохранённых RAM/IRAM. Owner `0x90c8` и private
+FSbuf backing `0x8000` выделились, конструктор вернул ожидаемый owner, а FSbuf
+записал один chunk. Это снимает только риск неверной геометрии минимального
+FSbuf: очередь, URI open, чтение B и playback по-прежнему не исполнены.
+Воспроизвести: `py tools/verify_b_fsbuf_constructor.py`.
 
 **Обновление 18 октября:** подтверждён startup-loader `OSOS+0x8392c`, который
 копирует MP3 sync worker из `OSOS+0x7326c8..0x733ca0` в
