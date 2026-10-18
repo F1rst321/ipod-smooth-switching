@@ -20,6 +20,7 @@ STOCK_OSOS_SHA256 = "784ae3d5540fd2f89e8c947b93629e97f62a06dc311d9745aab143e4db6
 STOCK_OSOS_SIZE = 7_561_216
 OSOS_LOAD_ALIAS = 0x04000000
 IRAM_BASE = 0x40000000
+IRAM_SIZE = 0x20000
 
 COPY_TRIPLES = (0x840A8, 0x840BC)
 CLEAR_PAIRS = (0x840B8, 0x840CC)
@@ -49,13 +50,15 @@ def main() -> int:
 
     print(f"Stock OSOS verified: {len(osos):,} bytes, SHA-256 {digest}")
     print("Loader: OSOS+0x8392c, called by startup OSOS+0x2c0")
+    snapshot_mismatch = False
     for table_offset in COPY_TRIPLES:
         source_alias = read_word(osos, table_offset)
         destination = read_word(osos, table_offset + 4)
         length = read_word(osos, table_offset + 8)
         source = source_alias - OSOS_LOAD_ALIAS
         if (source < 0 or source + length > len(osos) or
-                destination < IRAM_BASE or length == 0):
+                destination < IRAM_BASE or
+                destination + length > IRAM_BASE + IRAM_SIZE or length == 0):
             parser.error(f"invalid copy triple at OSOS+0x{table_offset:x}")
         print(f"Copy OSOS+0x{source:06x}..0x{source + length:06x} "
               f"-> IRAM 0x{destination:08x}..0x{destination + length:08x}")
@@ -63,9 +66,11 @@ def main() -> int:
             iram_offset = destination - IRAM_BASE
             if iram_offset < 0 or iram_offset + length > len(iram):
                 print("  snapshot: destination is outside captured IRAM")
+                snapshot_mismatch = True
             else:
                 same = osos[source:source + length] == iram[iram_offset:iram_offset + length]
                 print(f"  snapshot: {'exact byte match' if same else 'DIFFERS'}")
+                snapshot_mismatch |= not same
 
     for table_offset in CLEAR_PAIRS:
         destination = read_word(osos, table_offset)
@@ -75,7 +80,7 @@ def main() -> int:
 
     print("The copy table describes early boot relocation only; it does not "
           "prove the code is currently running or safe to patch.")
-    return 0
+    return 1 if snapshot_mismatch else 0
 
 
 if __name__ == "__main__":
