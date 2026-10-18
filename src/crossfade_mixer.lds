@@ -9,6 +9,7 @@ SECTIONS
     .text : ALIGN(4) {
         KEEP(*(.text.ipod_crossfade_resource_registry_reset_gate))
         KEEP(*(.text.ipod_crossfade_playback_mix_gate))
+        KEEP(*(.text.ipod_crossfade_mp3_item_service_gate))
         KEEP(*(.text.ipod_crossfade_playback_mix_hook))
         KEEP(*(.text.ipod_crossfade_open_track_resource_b))
         KEEP(*(.text.ipod_crossfade_begin))

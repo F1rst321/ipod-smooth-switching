@@ -38,6 +38,8 @@ AUDIO_HOOK_START = 0x10714200
 AUDIO_HOOK_SITE_OFFSET = 0x1D606C
 AUDIO_HOOK_STOCK_BRANCH = 0xEB010711
 AUDIO_HOOK_STOCK_TARGET = 0x10217CB8
+MP3_ITEM_SERVICE_SITE_OFFSET = 0x128128
+MP3_ITEM_SERVICE_STOCK_WORD = 0xE59D0004
 AUDIO_B_PCM_BYTES = 4608
 
 
@@ -121,6 +123,11 @@ def require_audio_payload(
         raise ValueError("audio payload has no aligned ARM playback gate")
     if gate < AUDIO_HOOK_START or gate >= AUDIO_HOOK_START + len(payload):
         raise ValueError("audio playback gate is outside the payload")
+    mp3_service_gate = symbols.get("ipod_crossfade_mp3_item_service_gate")
+    if not isinstance(mp3_service_gate, int) or mp3_service_gate & 3:
+        raise ValueError("audio payload has no aligned MP3 item service gate")
+    if mp3_service_gate < AUDIO_HOOK_START or mp3_service_gate >= AUDIO_HOOK_START + len(payload):
+        raise ValueError("MP3 item service gate is outside the payload")
     if not payload or AUDIO_HOOK_START + len(payload) > OSOS_LOAD_ADDRESS + RESOURCE_WINDOW_END:
         raise ValueError("audio payload exceeds the audited OSOS zero window")
     state_address = symbols.get("ipod_crossfade_playback_hook_state")
@@ -130,10 +137,13 @@ def require_audio_payload(
     if state_offset < 0 or state_offset + 40 > len(payload):
         raise ValueError("playback-hook state is outside the audio payload")
     state_fields = struct.unpack_from("<10I", payload, state_offset)
-    state_magic, state_enabled = state_fields[:2]
+    state_magic, state_enabled, state_item_b = state_fields[:3]
     state_output, state_capacity = state_fields[8:10]
-    if state_magic != 0x43524650 or state_enabled != 0:
-        raise ValueError("playback hook must have its expected magic and default disabled state")
+    if state_magic != 0x43524650 or state_enabled != 0 or state_item_b != 0:
+        raise ValueError(
+            "playback hook must have its expected magic, disabled state, "
+            "and null B item pointer"
+        )
     scratch_address = symbols.get("ipod_crossfade_output_b_scratch")
     if not isinstance(scratch_address, int) or scratch_address & 3:
         raise ValueError("audio payload has no aligned B PCM scratch buffer")
@@ -187,6 +197,8 @@ def build_candidate(
 
     audio_hook_word: int | None = None
     audio_gate: int | None = None
+    mp3_item_service_word: int | None = None
+    mp3_item_service_gate: int | None = None
     if audio_payload is not None:
         if audio_manifest is None:
             raise ValueError("audio payload manifest is required")
@@ -194,6 +206,9 @@ def build_candidate(
         if not isinstance(audio_symbols, dict):
             raise ValueError("audio payload manifest is missing its symbols")
         audio_gate = int(audio_symbols["ipod_crossfade_playback_mix_gate"])
+        mp3_item_service_gate = int(
+            audio_symbols["ipod_crossfade_mp3_item_service_gate"]
+        )
         audio_file_offset = AUDIO_HOOK_START - OSOS_LOAD_ADDRESS
         if resource_used_end > HANDLER_FILE_OFFSET:
             raise ValueError("UI resource region overlaps Settings handler placement")
@@ -210,8 +225,24 @@ def build_candidate(
         if branch_target(audio_site, stock_audio_word) != AUDIO_HOOK_STOCK_TARGET:
             raise ValueError("stock voice-mixer call no longer has the audited target")
         audio_hook_word = arm_link_branch(audio_site, audio_gate)
+        mp3_service_site = OSOS_LOAD_ADDRESS + MP3_ITEM_SERVICE_SITE_OFFSET
+        stock_mp3_service_word = struct.unpack_from(
+            "<I", stock_osos, MP3_ITEM_SERVICE_SITE_OFFSET
+        )[0]
+        if stock_mp3_service_word != MP3_ITEM_SERVICE_STOCK_WORD:
+            raise ValueError(
+                "unexpected MP3 item service instruction at "
+                f"OSOS+0x{MP3_ITEM_SERVICE_SITE_OFFSET:x}"
+            )
+        mp3_item_service_word = arm_branch(
+            mp3_service_site,
+            mp3_item_service_gate,
+        )
         candidate[audio_file_offset:audio_file_offset + len(audio_payload)] = audio_payload
         struct.pack_into("<I", candidate, AUDIO_HOOK_SITE_OFFSET, audio_hook_word)
+        struct.pack_into(
+            "<I", candidate, MP3_ITEM_SERVICE_SITE_OFFSET, mp3_item_service_word
+        )
 
     # Account for every changed OSOS byte in the resource prototype or one of
     # the explicitly placed payloads and audited dispatch instructions.
@@ -223,6 +254,11 @@ def build_candidate(
         audio_file_offset = AUDIO_HOOK_START - OSOS_LOAD_ADDRESS
         expected[audio_file_offset:audio_file_offset + len(audio_payload)] = audio_payload
         struct.pack_into("<I", expected, AUDIO_HOOK_SITE_OFFSET, audio_hook_word)
+        if mp3_item_service_word is None:
+            raise ValueError("MP3 item service gate branch was not built")
+        struct.pack_into(
+            "<I", expected, MP3_ITEM_SERVICE_SITE_OFFSET, mp3_item_service_word
+        )
     if candidate != expected or len(candidate) != EXPECTED_OSOS_SIZE:
         raise ValueError("candidate differs outside explicitly permitted OSOS patches")
 
@@ -242,6 +278,13 @@ def build_candidate(
             raise ValueError("audio hook code bytes differ from the compiled payload")
         if branch_target(OSOS_LOAD_ADDRESS + AUDIO_HOOK_SITE_OFFSET, audio_hook_word) != audio_gate:
             raise ValueError("playback hook BL does not reach its ARM gate")
+        if mp3_item_service_word is None or mp3_item_service_gate is None:
+            raise ValueError("MP3 item service gate branch is incomplete")
+        if branch_target(
+            OSOS_LOAD_ADDRESS + MP3_ITEM_SERVICE_SITE_OFFSET,
+            mp3_item_service_word,
+        ) != mp3_item_service_gate:
+            raise ValueError("MP3 item service branch does not reach its gate")
 
     manifest: dict[str, object] = {
         "artifact_type": "experimental_offline_retailos_osos_candidate",
@@ -294,6 +337,7 @@ def build_candidate(
             "The Volume Limit View is reused as a UI hypothesis; wheel behavior is unverified.",
             "The Settings property handlers have not been emulated in this build step.",
             "The optional playback helper branch and its default-off data need device validation.",
+            "The B-only slot-5 gate is dormant until playback-hook state names item B.",
             "No next-track resource/item lifecycle or automatic fade trigger is installed.",
             "This OSOS is not an installable or verified firmware image.",
         ],
@@ -310,6 +354,15 @@ def build_candidate(
             "branch_word": f"0x{audio_hook_word:08x}",
             "target": f"0x{audio_gate:08x}",
             "stock_target": f"0x{AUDIO_HOOK_STOCK_TARGET:08x}",
+        }
+        if mp3_item_service_word is None or mp3_item_service_gate is None:
+            raise ValueError("MP3 item service branch metadata is incomplete")
+        manifest["patched_dispatch_branches"]["mp3_item_service"] = {
+            "file_offset": MP3_ITEM_SERVICE_SITE_OFFSET,
+            "branch_word": f"0x{mp3_item_service_word:08x}",
+            "target": f"0x{mp3_item_service_gate:08x}",
+            "stock_instruction": f"0x{MP3_ITEM_SERVICE_STOCK_WORD:08x}",
+            "dormant_when_item_b_pointer_is_zero": True,
         }
     payload_window_used_end = max(
         resource_used_end,

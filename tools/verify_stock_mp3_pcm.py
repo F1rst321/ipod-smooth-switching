@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 """Emulate serialized A/B MP3 worker calls and inspect their PCM output.
 
-The test runs exact local OSOS/HIBE/IRAM worker code, with separate mocked file
-streams, a cloned callback/history for B, a synchronous sync-queue scheduler,
-and one PP5022 MMIO value. It does not model queue concurrency or the physical
-iPod. Install Unicorn with ``py -m pip install --target build/pydeps
+The test runs exact local OSOS/HIBE/IRAM worker code. It initializes B's stock
+MP3 item after A has decoded three blocks, then checks that A remains intact
+before switching the cloned callback/history to B. The payload's conditional
+gate preserves slot-5 methods for A and skips them for the selected B item.
+File streams,
+external service methods, sync dispatch, and one PP5022 MMIO value are mocked.
+It does not model queue concurrency or the physical iPod. Install Unicorn with
+``py -m pip install --target build/pydeps
 -r requirements-emulation.txt``.
 """
 from __future__ import annotations
@@ -36,12 +40,14 @@ from unicorn.arm_const import (  # noqa: E402
     UC_ARM_REG_R1,
     UC_ARM_REG_R2,
     UC_ARM_REG_R3,
+    UC_ARM_REG_R5,
     UC_ARM_REG_SP,
     UC_ARM_REG_CPSR,
 )
 
 from map_codec_overlay import load_ranges, load_zero_ranges  # noqa: E402
 from verify_crossfade_mixer import load_symbols  # noqa: E402
+from build_crossfade_osos_candidate import arm_branch, branch_target  # noqa: E402
 
 DEFAULT_OSOS = PROJECT_ROOT / "firmware" / "extracted" / "audio-analysis" / "osos.bin"
 DEFAULT_HIBE = PROJECT_ROOT / "build" / "audio-analysis" / "hibe.bin"
@@ -74,7 +80,8 @@ OUTPUT_ADDRESS = 0x20090000
 OUTPUT_B_ADDRESS = 0x20092000
 MIX_OUTPUT_ADDRESS = 0x20094000
 MIX_STATE_ADDRESS = 0x20096000
-MIXER_CODE_ADDRESS = 0x10712000
+MIXER_CODE_WINDOW_START = 0x10712000
+MIXER_CODE_WINDOW_END = 0x107161A4
 MIXER_CODE_WINDOW_BYTES = 16_804
 FILE_BUFFER_ADDRESS = 0x20080000
 FILE_BUFFER_B_ADDRESS = 0x20086000
@@ -169,6 +176,14 @@ def main() -> int:
         args.toolchain_bin / "arm-none-eabi-nm.exe",
         args.mixer_elf,
     )
+    mixer_payload_address = mixer_symbols.get("ipod_crossfade_resource_registry_reset_gate")
+    if not isinstance(mixer_payload_address, int):
+        raise ValueError("Mixer ELF has no payload-start gate symbol")
+    if (
+        mixer_payload_address < MIXER_CODE_WINDOW_START
+        or mixer_payload_address + len(mixer_code) > MIXER_CODE_WINDOW_END
+    ):
+        raise ValueError("Mixer payload lies outside the audited OSOS code window")
     audio_offset = mp3_audio_offset(file_data)
     audio_offset_b = mp3_audio_offset(file_data_b)
     machine = Uc(UC_ARCH_ARM, UC_MODE_ARM | UC_MODE_LITTLE_ENDIAN)
@@ -190,7 +205,7 @@ def main() -> int:
         )
     for start, end in load_zero_ranges(osos, 0):
         machine.mem_write(start, bytes(end - start))
-    machine.mem_write(MIXER_CODE_ADDRESS, mixer_code)
+    machine.mem_write(mixer_payload_address, mixer_code)
 
     machine.mem_map(0x20000000, 0x100000)
     item = ITEM_ADDRESS
@@ -204,6 +219,8 @@ def main() -> int:
     machine.mem_write(FILE_BUFFER_B_ADDRESS, file_data_b)
 
     last_pcs: list[int] = []
+    service_branch_site_words: list[int] = []
+    service_gate_item_values: list[int] = []
     last_call_instruction_count = [0]
     stream_positions = {0x20030000: 0, 0x2003A000: 0}
     stream_object = 0x20030000
@@ -221,6 +238,7 @@ def main() -> int:
     reader_stub_base = 0x200E2000
     method_offsets = (0x00, 0x08, 0x0C, 0x10, 0x18, 0x20, 0x24, 0x28)
     callback_returns: list[tuple[int, int]] = []
+    service_method_calls: list[int] = []
     reader_positions = {reader_object: 0, reader_b_object: 0}
     reader_inputs = {
         reader_object: (file_data, FILE_BUFFER_ADDRESS),
@@ -258,6 +276,12 @@ def main() -> int:
     def code_hook(uc, address, _size, _user_data):
         last_call_instruction_count[0] += 1
         last_pcs.append(address)
+        if address == 0x10128128:
+            service_branch_site_words.append(
+                struct.unpack("<I", uc.mem_read(address, 4))[0]
+            )
+        if address == mixer_symbols.get("ipod_crossfade_mp3_item_service_gate"):
+            service_gate_item_values.append(uc.reg_read(UC_ARM_REG_R5))
         if len(last_pcs) > 30:
             last_pcs.pop(0)
         if address == 0x4001CF90:
@@ -364,6 +388,7 @@ def main() -> int:
             uc.reg_write(UC_ARM_REG_PC, uc.reg_read(UC_ARM_REG_LR))
             return
         if service_stub_base <= address <= service_stub_base + 0x20:
+            service_method_calls.append(address - service_stub_base)
             uc.reg_write(UC_ARM_REG_R0, 0)
             uc.reg_write(UC_ARM_REG_PC, uc.reg_read(UC_ARM_REG_LR))
             return
@@ -437,14 +462,35 @@ def main() -> int:
             raise RuntimeError(f"Thumb payload function 0x{address:08x} did not return")
         return machine.reg_read(UC_ARM_REG_R0)
 
+    service_bypass_address = 0x10128128
+    service_bypass_original = bytes(machine.mem_read(service_bypass_address, 4))
+    if service_bypass_original != bytes.fromhex("04 00 9d e5"):
+        raise RuntimeError(
+            "Unexpected stock instruction at MP3 item service-method call site: "
+            f"{service_bypass_original.hex(' ')}"
+        )
+    service_gate = mixer_symbols.get("ipod_crossfade_mp3_item_service_gate")
+    hook_state = mixer_symbols.get("ipod_crossfade_playback_hook_state")
+    if not isinstance(service_gate, int) or not isinstance(hook_state, int):
+        raise RuntimeError("Audio payload is missing the B-only service gate or state")
+    service_gate_branch = arm_branch(service_bypass_address, service_gate)
+    if branch_target(service_bypass_address, service_gate_branch) != service_gate:
+        raise RuntimeError("B-only service gate branch target is invalid")
+    # Point the gate at B before either item initializer runs. A must retain
+    # the stock path; B must leave the shared audio-output methods alone.
+    machine.mem_write(hook_state + 8, struct.pack("<I", ITEM_B_ADDRESS))
+    machine.mem_write(service_bypass_address, struct.pack("<I", service_gate_branch))
+    machine.ctl_remove_cache(service_bypass_address, service_bypass_address + 4)
+
     call(0x4000BC9C, (item + 0x44, 0, 0))
-    call(0x4000BC9C, (ITEM_B_ADDRESS + 0x44, 0, 0))
     call(0x10127DF4, (item, metadata, 0, reader_object))
-    call(0x10127DF4, (ITEM_B_ADDRESS, metadata, 0, reader_b_object))
+    if sorted(service_method_calls) != [0, 0x20]:
+        raise RuntimeError(
+            f"A initialization did not exercise both slot-5 methods: "
+            f"{service_method_calls}"
+        )
     if machine.mem_read(item + 0x3BC8, 1)[0]:
         raise RuntimeError("Stock MP3 item initialization set its failure flag")
-    if machine.mem_read(ITEM_B_ADDRESS + 0x3BC8, 1)[0]:
-        raise RuntimeError("Stock MP3 item B initialization set its failure flag")
     active_item_cell = 0x40013A64
     machine.mem_write(active_item_cell, struct.pack("<I", item + 0x44))
     machine.mem_write(0x4000248C, struct.pack("<I", OUTPUT_ADDRESS))
@@ -452,19 +498,6 @@ def main() -> int:
     callback = struct.unpack("<I", machine.mem_read(0x149EE078 + 0x44, 4))[0]
     callback_context = struct.unpack("<I", machine.mem_read(callback + 0x0C, 4))[0]
     call(0x10124990, (callback_context,))
-    callback_b = CALLBACK_B_ADDRESS
-    callback_context_b = CALLBACK_CONTEXT_B_ADDRESS
-    callback_bytes = bytes(machine.mem_read(callback, 0x20))
-    machine.mem_write(callback_b, callback_bytes)
-    machine.mem_write(callback_b + 0x0C, struct.pack("<I", callback_context_b))
-    machine.mem_write(
-        callback_context_b,
-        bytes(machine.mem_read(callback_context, CALLBACK_CONTEXT_BYTES)),
-    )
-    call(0x10124990, (callback_context_b,))
-    callback_context_b_reset = bytes(
-        machine.mem_read(callback_context_b, CALLBACK_CONTEXT_BYTES)
-    )
     # HIBE captured this shared queue idle; set its active-work flag in RAM.
     machine.mem_write(0x149EE078 + 0x80, struct.pack("<I", 1))
     stream_positions[stream_object] = audio_offset
@@ -493,6 +526,12 @@ def main() -> int:
         machine.mem_read(callback_context, CALLBACK_CONTEXT_BYTES)
     )
     item_a_before_b = bytes(machine.mem_read(item, ITEM_BYTES))
+    active_a_before_b_init = bytes(machine.mem_read(active_item_cell, 4))
+    callback_a_before_b_init = bytes(machine.mem_read(0x149EE078 + 0x44, 4))
+    output_a_slots_before_b_init = (
+        bytes(machine.mem_read(0x4000248C, 4)),
+        bytes(machine.mem_read(0x40002510, 4)),
+    )
     queue_submitted = struct.unpack("<I", machine.mem_read(0x149EE078 + 0x78, 4))[0]
     queue_completed = struct.unpack("<I", machine.mem_read(0x149EE078 + 0x7C, 4))[0]
     if queue_submitted != queue_completed:
@@ -500,6 +539,69 @@ def main() -> int:
             f"Cannot switch contexts with pending jobs: "
             f"submitted={queue_submitted}, completed={queue_completed}"
         )
+
+    # Initialize B only after A has produced audio, then confirm the actual
+    # payload gate leaves A's active item, history, and output slots intact.
+    call(0x4000BC9C, (ITEM_B_ADDRESS + 0x44, 0, 0))
+    service_calls_before_b = len(service_method_calls)
+    try:
+        call(0x10127DF4, (ITEM_B_ADDRESS, metadata, 0, reader_b_object))
+    finally:
+        machine.mem_write(service_bypass_address, service_bypass_original)
+        machine.ctl_remove_cache(
+            service_bypass_address,
+            service_bypass_address + 4,
+        )
+    if len(service_method_calls) != service_calls_before_b:
+        raise RuntimeError(
+            "B-only service gate reached the shared slot-5 methods: "
+            f"before={service_calls_before_b}, after={service_method_calls}"
+        )
+    if service_branch_site_words != [service_gate_branch, service_gate_branch]:
+        raise RuntimeError(
+            f"Unexpected slot-5 branch-site execution: {service_branch_site_words}"
+        )
+    if service_gate_item_values != [item, ITEM_B_ADDRESS]:
+        raise RuntimeError(
+            f"B-only service gate observed unexpected item pointers: "
+            f"{service_gate_item_values}"
+        )
+    if machine.mem_read(ITEM_B_ADDRESS + 0x3BC8, 1)[0]:
+        raise RuntimeError("Stock MP3 item B initialization set its failure flag")
+    if bytes(machine.mem_read(active_item_cell, 4)) != active_a_before_b_init:
+        raise RuntimeError("Initializing B changed the active A decoder context")
+    if bytes(machine.mem_read(0x149EE078 + 0x44, 4)) != callback_a_before_b_init:
+        raise RuntimeError("Initializing B changed the active A sync callback")
+    if bytes(machine.mem_read(item, ITEM_BYTES)) != item_a_before_b:
+        raise RuntimeError("Initializing B changed A's stock MP3 item state")
+    if bytes(machine.mem_read(callback_context, CALLBACK_CONTEXT_BYTES)) != history_a_before_b:
+        raise RuntimeError("Initializing B changed A's synthesis history")
+    if (
+        bytes(machine.mem_read(0x4000248C, 4)),
+        bytes(machine.mem_read(0x40002510, 4)),
+    ) != output_a_slots_before_b_init:
+        raise RuntimeError("Initializing B changed A's active output slots")
+    queue_submitted = struct.unpack("<I", machine.mem_read(0x149EE078 + 0x78, 4))[0]
+    queue_completed = struct.unpack("<I", machine.mem_read(0x149EE078 + 0x7C, 4))[0]
+    if queue_submitted != queue_completed:
+        raise RuntimeError("B initialization left sync-queue work pending")
+
+    callback_b = CALLBACK_B_ADDRESS
+    callback_context_b = CALLBACK_CONTEXT_B_ADDRESS
+    callback_bytes = bytes(machine.mem_read(callback, 0x20))
+    machine.mem_write(callback_b, callback_bytes)
+    machine.mem_write(callback_b + 0x0C, struct.pack("<I", callback_context_b))
+    machine.mem_write(
+        callback_context_b,
+        bytes(machine.mem_read(callback_context, CALLBACK_CONTEXT_BYTES)),
+    )
+    call(0x10124990, (callback_context_b,))
+    callback_context_b_reset = bytes(
+        machine.mem_read(callback_context_b, CALLBACK_CONTEXT_BYTES)
+    )
+    stream_positions[stream_b_object] = audio_offset_b
+    reader_positions[reader_b_object] = audio_offset_b
+
     machine.mem_write(0x149EE078 + 0x44, struct.pack("<I", callback_b))
     machine.mem_write(active_item_cell, struct.pack("<I", ITEM_B_ADDRESS + 0x44))
     machine.mem_write(0x4000248C, struct.pack("<I", output_b))
@@ -707,6 +809,14 @@ def main() -> int:
     print(f"  B PCM16 stereo block: {sum(value != 0 for value in samples_b)}/{len(samples_b)} "
           f"nonzero; range {min(samples_b)}..{max(samples_b)}")
     print("  PASS: B used its cloned synthesis history; A item and history stayed intact")
+    print(
+        "  PASS: stock B item initialization ran after A playback without changing "
+        "A's item, history, callback, or output slots"
+    )
+    print(
+        "  PASS: payload's B-only service gate preserved A's two stock slot-5 "
+        "calls and skipped both for B"
+    )
     print("  PASS: A and B each resumed after one interleaved worker call")
     print(
         "  PASS: playback hook decoded B and mixed it before the mocked stock "
@@ -714,9 +824,12 @@ def main() -> int:
     )
     print(f"  PASS: ARM mixer combined decoded A/B PCM for {mixed_frames} frames "
           f"inside a three-second fade ({mixer_state[1]}/{mixer_state[0]} frames done)")
-    print("  Scope: instruction counts are emulator counts, not measured CPU cycles. "
-          "Callbacks are dispatched synchronously at an idle queue boundary; "
-          "file I/O, queue scheduling, and MMIO are mocked. No physical playback.")
+    print(
+        "  Scope: instruction counts are emulator counts, not measured CPU cycles. "
+        "Callbacks are dispatched synchronously at an idle queue boundary; file "
+        "I/O, queue scheduling, service slot 5, and MMIO are mocked. No physical "
+        "playback."
+    )
     return 0
 
 

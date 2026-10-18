@@ -58,3 +58,39 @@ ipod_crossfade_playback_mix_gate:
     .word ipod_crossfade_playback_mix_hook
 
 .size ipod_crossfade_playback_mix_gate, .-ipod_crossfade_playback_mix_gate
+
+.section .text.ipod_crossfade_mp3_item_service_gate, "ax", %progbits
+.align 2
+.global ipod_crossfade_mp3_item_service_gate
+.type ipod_crossfade_mp3_item_service_gate, %function
+
+/*
+ * Replaces OSOS+0x128128, which starts the slot-5 output methods. R5 is the
+ * MP3 item. Only the item recorded in playback_hook_state.item_b bypasses
+ * the shared output service; A executes the displaced LDR and resumes the
+ * stock instructions. B jumps to the original initializer epilogue.
+ */
+ipod_crossfade_mp3_item_service_gate:
+    ldr     r12, .Lplayback_state_pointer
+    ldr     r12, [r12, #8]
+    cmp     r5, r12
+    beq     .Lbypass_output_service
+
+    /* Recreate the displaced stock instruction, preserving the A path. */
+    ldr     r0, [sp, #4]
+    ldr     r12, .Lstock_service_continue
+    bx      r12
+
+.Lbypass_output_service:
+    ldr     r12, .Lstock_item_epilogue
+    bx      r12
+
+.align 2
+.Lplayback_state_pointer:
+    .word ipod_crossfade_playback_hook_state
+.Lstock_service_continue:
+    .word 0x1012812c
+.Lstock_item_epilogue:
+    .word 0x10128154
+
+.size ipod_crossfade_mp3_item_service_gate, .-ipod_crossfade_mp3_item_service_gate

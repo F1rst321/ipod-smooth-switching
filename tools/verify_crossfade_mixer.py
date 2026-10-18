@@ -21,7 +21,6 @@ DEFAULT_BUILD_DIR = PROJECT_ROOT / "build" / "crossfade-mixer"
 DEFAULT_TOOLCHAIN_BIN = (
     PROJECT_ROOT / "build" / "toolchains" / "arm-gnu-14.3" / "unpacked" / "bin"
 )
-CODE_BASE = 0x10712000
 CODE_MAP_SIZE = 0x10000
 RAM_BASE = 0x20000000
 RAM_MAP_SIZE = 0x20000
@@ -117,6 +116,7 @@ class MixerEmulator:
         self.r5_register = UC_ARM_REG_R5
         self.cpsr_register = UC_ARM_REG_CPSR
         self.symbols = symbols
+        code_base = symbols["ipod_crossfade_resource_registry_reset_gate"]
         self.heap_allocate_result = 0
         self.heap_requests: list[int] = []
         self.heap_releases: list[int] = []
@@ -126,8 +126,8 @@ class MixerEmulator:
         self.resource_factory_result = 0
         self.resource_factory_value = 0xAABBCCDD
         self.registry_reset_calls: list[int] = []
-        self.uc.mem_map(CODE_BASE, CODE_MAP_SIZE)
-        self.uc.mem_write(CODE_BASE, code)
+        self.uc.mem_map(code_base & ~0xFFF, CODE_MAP_SIZE)
+        self.uc.mem_write(code_base, code)
         self.uc.mem_map(RAM_BASE, RAM_MAP_SIZE)
         self.uc.mem_map(RETAILOS_ALLOC_ADDRESS & 0xFFFFF000, 0x1000)
         self.uc.mem_map(RETAILOS_TRACK_RESOURCE_FACTORY & 0xFFFFF000, 0x1000)

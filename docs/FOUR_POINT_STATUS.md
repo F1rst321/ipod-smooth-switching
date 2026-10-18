@@ -936,8 +936,34 @@ partition также прошли. Полученный OSOS имеет SHA-256
 `28316a0d998f5ae9ff6c3bab7bf198c904ad4c29fbfc4f5f25b33ebd44ac8acc`, partition
 — `cdbe85661207f6d8a264cade95858f866b0094b82c310c1ffd43735add9c2247`.
 
-Это не закрывает запуск B: candidate state по умолчанию выключен, нет создания
-item-а/decoder context и связи со следующим треком, нет fade-trigger и handoff.
-Кроме того, emulation dispatch-ит очередь синхронно с пустым pending backlog,
-а file I/O, queue, voice mixer и физический iPod не моделируются. Образ остаётся
-офлайн исследовательским артефактом и не готов к установке.
+После трёх блоков A в эмуляцию добавлена инициализация штатного MP3 item B
+(`0x10127df4`) с отдельным mock reader-ом. Проверено, что она оставляет A item,
+history, active-item, callback, output slots и idle queue без изменений; затем
+worker B декодирует PCM и A продолжает. Реальные track/resource objects,
+service slot 5 и очередь при этом не использовались.
+
+Это не закрывает запуск B: candidate state по умолчанию выключен, нет связи
+эмулированного item-а с выбранным следующим треком, безопасной runtime resource
+factory, fade-trigger или handoff. Очередь в эмуляции dispatch-ится синхронно,
+file I/O, service slot 5, voice mixer и физический iPod не моделируются. Образ
+остаётся офлайн исследовательским артефактом и не готов к установке.
+
+### Проверка обхода двух общих audio-service вызовов для B — 18 октября 2026 года
+
+В OSOS candidate builder устанавливает ARM branch с `OSOS+0x128128` на
+conditional gate из payload. Gate сравнивает текущий item в `r5` с
+`playback_hook_state.item_b`; для A он исполняет вытесненную инструкцию и
+продолжает stock-код, для совпавшего B переходит к эпилогу `+0x128154`.
+Эмуляционный тест прошёл оба пути: A вызывает оба slot-5 метода, B их пропускает,
+декодирует PCM и оставляет возможность продолжить A.
+
+В готовом candidate pointer B по умолчанию равен нулю, и код, который должен
+установить его перед B initialization, ещё не подключён. Общий sync/event helper,
+service lookup, reader, очередь и MMIO остаются заглушками; проверено лишь, что
+условная развилка и worker работают в модели. OSOS SHA-256
+`2a58fb0b3a885e14c2b103a3ca0212b7c44485d4062019020b22bc25cdd62368`; полный
+partition SHA-256
+`6b690c25dd4b5e8b9006d5b1c6153d985d8c7cf528b75eca569c83da7b7eb09f`.
+Остались реальная B resource/item factory, проверка общей scratch и block-size
+state, fade trigger/handoff, boot/UI/audio проверка на самом iPod. Текущий образ
+не готов к установке.
