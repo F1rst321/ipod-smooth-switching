@@ -1145,6 +1145,23 @@ context, затем запустить его через `0x4001d13c`. Но fact
 Литералы и вызовы подтверждены read-only декомпиляцией
 `build/ghidra-provider-loaders-all-20261017.log`.
 
+### Маршрут запуска sync-worker через общий dispatcher — 19 октября
+
+Точный worker `OSOS+0x732f08` (копия в IRAM `0x4001d13c`) подготавливает
+request record и передаёт его generic dispatcher-у `OSOS+0x235250` вместе с
+указателем из `queue+0x3c`. В сохранённом HIBE этот контекст у MP3- и AAC-очереди
+одинаков: `RMIprimary+0x15c`, RAM `0x10937498` (uncached alias
+`0x14937498`). У dispatcher-а 44 статических callsite-а; его цикл ожидает
+завершения request и синхронизирует передачу сообщения с callback-ом.
+
+Это показывает, как отдельная decoder queue отправляет задания через общий
+request service. Совпадающий контекст и наличие generic dispatcher-а сами по
+себе не создают второй MP3 worker, не изолируют глобальное состояние кодека и
+не доказывают безопасную одновременную работу двух музыкальных потоков. Дамп
+функций и xref-ов воспроизводится read-only скриптом
+`tools/ghidra/DumpRetailFunctions.java`; локальный вывод находится в
+`build/ghidra-rmi-worker-route-20261019.log`.
+
 ### Возможная схема с одним декодером и PCM look-ahead
 
 Поскольку decoder item и MP3 sync/callback-очередь сейчас устроены как
