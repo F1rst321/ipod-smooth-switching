@@ -657,6 +657,16 @@ ABI-поля — в [`AUDIO_PATH.md`](AUDIO_PATH.md#подтверждённый
 read-only дампы — `build/ghidra-voice-source-api.log` и
 `build/ghidra-crossfade-gain-control.log`.
 
+Новая read-only трассировка `+0x23fc50`/`+0x23f444` показывает, что voice worker
+получает source-элементы из отдельного provider-а, а `+0x146ba4` поддерживает
+позицию и переход к следующему descriptor-у. Это кандидат на потоковую подачу
+PCM дорожки B через штатный voice renderer, что может избежать многомегабайтного
+PCM look-ahead. Безопасное создание/подключение пользовательского provider-а,
+его формат и выдача данных вторым MP3 producer-ом не доказаны. Это направление
+для статического прототипа, а не готовая функция; новые дампы сохранены в
+`build/ghidra-voice-stream-probe-20261018.log` и
+`build/ghidra-voice-provider-probe-20261018.log`.
+
 Расширять дисковый размер OSOS ради аудиобуфера не следует. PCM на 3–10 секунд
 при 44,1 кГц stereo PCM16 занимает от 529 920 до 1 764 864 байт с текущим
 выравниванием блоков. Это должна быть runtime-аллокация в heap. План роста OSOS
