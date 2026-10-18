@@ -40,6 +40,9 @@ AUDIO_HOOK_STOCK_BRANCH = 0xEB010711
 AUDIO_HOOK_STOCK_TARGET = 0x10217CB8
 MP3_ITEM_SERVICE_SITE_OFFSET = 0x128128
 MP3_ITEM_SERVICE_STOCK_WORD = 0xE59D0004
+RESOURCE_RESET_SITE_OFFSET = 0x0EC340
+RESOURCE_RESET_STOCK_WORD = 0xEB011BD8
+RESOURCE_RESET_STOCK_TARGET = 0x101332A8
 AUDIO_B_PCM_BYTES = 4608
 
 
@@ -128,6 +131,18 @@ def require_audio_payload(
         raise ValueError("audio payload has no aligned MP3 item service gate")
     if mp3_service_gate < AUDIO_HOOK_START or mp3_service_gate >= AUDIO_HOOK_START + len(payload):
         raise ValueError("MP3 item service gate is outside the payload")
+    resource_reset_gate = symbols.get("ipod_crossfade_resource_registry_reset_gate")
+    if not isinstance(resource_reset_gate, int) or resource_reset_gate & 3:
+        raise ValueError("audio payload has no aligned ARM resource-reset gate")
+    if (resource_reset_gate < AUDIO_HOOK_START
+            or resource_reset_gate >= AUDIO_HOOK_START + len(payload)):
+        raise ValueError("resource-reset gate is outside the payload")
+    resource_factory_helper = symbols.get("ipod_crossfade_open_track_resource_b")
+    if not isinstance(resource_factory_helper, int) or resource_factory_helper & 1:
+        raise ValueError("audio payload has no Thumb B-resource factory helper")
+    if (resource_factory_helper < AUDIO_HOOK_START
+            or resource_factory_helper >= AUDIO_HOOK_START + len(payload)):
+        raise ValueError("B-resource factory helper is outside the payload")
     if not payload or AUDIO_HOOK_START + len(payload) > OSOS_LOAD_ADDRESS + RESOURCE_WINDOW_END:
         raise ValueError("audio payload exceeds the audited OSOS zero window")
     state_address = symbols.get("ipod_crossfade_playback_hook_state")
@@ -199,6 +214,8 @@ def build_candidate(
     audio_gate: int | None = None
     mp3_item_service_word: int | None = None
     mp3_item_service_gate: int | None = None
+    resource_reset_word: int | None = None
+    resource_reset_gate: int | None = None
     if audio_payload is not None:
         if audio_manifest is None:
             raise ValueError("audio payload manifest is required")
@@ -208,6 +225,9 @@ def build_candidate(
         audio_gate = int(audio_symbols["ipod_crossfade_playback_mix_gate"])
         mp3_item_service_gate = int(
             audio_symbols["ipod_crossfade_mp3_item_service_gate"]
+        )
+        resource_reset_gate = int(
+            audio_symbols["ipod_crossfade_resource_registry_reset_gate"]
         )
         audio_file_offset = AUDIO_HOOK_START - OSOS_LOAD_ADDRESS
         if resource_used_end > HANDLER_FILE_OFFSET:
@@ -238,10 +258,30 @@ def build_candidate(
             mp3_service_site,
             mp3_item_service_gate,
         )
+        resource_reset_site = OSOS_LOAD_ADDRESS + RESOURCE_RESET_SITE_OFFSET
+        stock_resource_reset_word = struct.unpack_from(
+            "<I", stock_osos, RESOURCE_RESET_SITE_OFFSET
+        )[0]
+        if stock_resource_reset_word != RESOURCE_RESET_STOCK_WORD:
+            raise ValueError(
+                "unexpected resource-registry reset call at "
+                f"OSOS+0x{RESOURCE_RESET_SITE_OFFSET:x}"
+            )
+        if branch_target(resource_reset_site, stock_resource_reset_word) != (
+            RESOURCE_RESET_STOCK_TARGET
+        ):
+            raise ValueError("stock resource-reset call no longer targets its audited function")
+        # Preserve the stock call's return address at OSOS+0xec344.
+        resource_reset_word = arm_link_branch(resource_reset_site, resource_reset_gate)
+        if resource_reset_word & 0xFF000000 != 0xEB000000:
+            raise ValueError("resource-reset gate must be called with ARM BL semantics")
         candidate[audio_file_offset:audio_file_offset + len(audio_payload)] = audio_payload
         struct.pack_into("<I", candidate, AUDIO_HOOK_SITE_OFFSET, audio_hook_word)
         struct.pack_into(
             "<I", candidate, MP3_ITEM_SERVICE_SITE_OFFSET, mp3_item_service_word
+        )
+        struct.pack_into(
+            "<I", candidate, RESOURCE_RESET_SITE_OFFSET, resource_reset_word
         )
 
     # Account for every changed OSOS byte in the resource prototype or one of
@@ -258,6 +298,11 @@ def build_candidate(
             raise ValueError("MP3 item service gate branch was not built")
         struct.pack_into(
             "<I", expected, MP3_ITEM_SERVICE_SITE_OFFSET, mp3_item_service_word
+        )
+        if resource_reset_word is None:
+            raise ValueError("resource-reset gate branch was not built")
+        struct.pack_into(
+            "<I", expected, RESOURCE_RESET_SITE_OFFSET, resource_reset_word
         )
     if candidate != expected or len(candidate) != EXPECTED_OSOS_SIZE:
         raise ValueError("candidate differs outside explicitly permitted OSOS patches")
@@ -285,6 +330,19 @@ def build_candidate(
             mp3_item_service_word,
         ) != mp3_item_service_gate:
             raise ValueError("MP3 item service branch does not reach its gate")
+        if resource_reset_word is None or resource_reset_gate is None:
+            raise ValueError("resource-reset gate branch is incomplete")
+        if struct.unpack_from("<I", candidate, RESOURCE_RESET_SITE_OFFSET)[0] != (
+            resource_reset_word
+        ):
+            raise ValueError("resource-reset gate branch write failed verification")
+        if branch_target(
+            OSOS_LOAD_ADDRESS + RESOURCE_RESET_SITE_OFFSET,
+            resource_reset_word,
+        ) != resource_reset_gate:
+            raise ValueError("resource-reset BL does not reach its ARM gate")
+        if resource_reset_word & 0xFF000000 != 0xEB000000:
+            raise ValueError("resource-reset dispatch lost the stock BL return address")
 
     manifest: dict[str, object] = {
         "artifact_type": "experimental_offline_retailos_osos_candidate",
@@ -363,6 +421,17 @@ def build_candidate(
             "target": f"0x{mp3_item_service_gate:08x}",
             "stock_instruction": f"0x{MP3_ITEM_SERVICE_STOCK_WORD:08x}",
             "dormant_when_item_b_pointer_is_zero": True,
+        }
+        if resource_reset_word is None or resource_reset_gate is None:
+            raise ValueError("resource-reset gate branch metadata is incomplete")
+        manifest["patched_dispatch_branches"]["resource_registry_reset"] = {
+            "file_offset": RESOURCE_RESET_SITE_OFFSET,
+            "branch_word": f"0x{resource_reset_word:08x}",
+            "instruction": "BL",
+            "target": f"0x{resource_reset_gate:08x}",
+            "stock_target": f"0x{RESOURCE_RESET_STOCK_TARGET:08x}",
+            "conditional_on_armed_matching_B_resource": True,
+            "B_factory_helper_is_not_connected_to_track_selection": True,
         }
     payload_window_used_end = max(
         resource_used_end,

@@ -1690,11 +1690,11 @@ output pointers восстанавливаются. Очередь синхро�
 voice mixer `0x10217cb8`, файловый интерфейс и MMIO подменены. Счётчик 426 313
 инструкций — число эмулированных инструкций, не время или такты PP5022.
 
-Этот тест проверяет полный B worker на границе перед voice mixer, но вызов в
-`OSOS+0x1d606c` ещё не пропатчен в образ. Не реализованы создание B из выбранной
-следующей песни, настройка и запуск перехода из UI, handoff после fade и
-проверка кода/heap в работающей RetailOS. Физический iPod не проверен. Поэтому
-текущий Settings candidate всё ещё не является установочной прошивкой.
+Этот тест проверяет полный B worker на границе перед voice mixer; вызов в
+`OSOS+0x1d606c` уже есть в offline candidate. Не реализованы создание B из
+выбранной следующей песни, настройка и запуск перехода из UI, handoff после fade
+и проверка кода/heap в работающей RetailOS. Физический iPod не проверен, поэтому
+текущий candidate всё ещё не является установочной прошивкой.
 
 Локальный прототип этого маршрута находится в `src/crossfade_resource_gate.c`
 и `src/crossfade_resource_gate.S`. C-помощник вызывает штатную фабрику
@@ -1705,9 +1705,9 @@ voice mixer `0x10217cb8`, файловый интерфейс и MMIO подме
 `tools/verify_crossfade_mixer.py` исполняет helper и gate в Unicorn, подменяя
 factory и reset заглушками. Поэтому эта проверка подтверждает машинный ABI и
 условную ветку, но не выполняет RetailOS, не открывает настоящий файл и не
-проверяет сохранность cache A на устройстве. В готовый OSOS этот call-site ещё
-не пропатчен; helper не подключён к выбору следующей песни или к MP3 decoder-у.
-Второй PCM producer и установленного кандидата всё ещё нет.
+проверяет сохранность cache A на устройстве. Новый offline candidate включает
+branch на reset gate; helper не подключён к выбору следующей песни или к MP3
+decoder-у. Второй PCM producer и установленного кандидата всё ещё нет.
 
 ### Изоляция финальных audio-service методов при инициализации B — 18 октября 2026 года
 
@@ -1874,10 +1874,12 @@ track-open для B опасно: он сбрасывает registry A. Ветк
 создание её owner/resource object и отдельного FSbuf для чтения B пока не
 реализовано.
 
-Следующий проверяемый вариант — сохранить живой registry A, создать B resource
-без `FUN_101332a8`, зарегистрировать его URI через штатный RMI API и связать
-с отдельным FSbuf/decoder state. До теста с реальными методами stream и
-последовательными чтениями A/B это только узкий кандидат. Read-only
+Предполагаемый путь B сохраняет живой registry A через условный reset gate,
+вызывает штатную фабрику B и регистрирует URI через штатный RMI API. Этот путь
+пока исполнялся только в Unicorn с mock factory/reset. Сборщик offline candidate
+теперь патчит `OSOS+0xec340` на gate, но helper ещё не вызывается при выборе
+следующей песни. До теста с реальными методами stream и последовательными
+чтениями A/B это только узкий кандидат. Read-only
 декомпиляция находится в ignored `build/ghidra-rmi-resource-open-followup.log`,
 а машинные инструкции аргументов и FSbuf request — в
 `build/ghidra-rmi-fsbuf-listing-followup.log`.
@@ -1903,3 +1905,20 @@ Caller `FUN_1025e148` передаёт `FUN_1024b5bc` адрес `0x14983100` и
 `build/ghidra-rmiprimary-caller-listing.log`,
 `build/ghidra-rmiprimary-clone-cost.log` и read-only
 `tools/inspect_hibe_audio.py`.
+
+### Runtime heap и conditional reset hook в offline candidate — 18 октября 2026 года
+
+Свободную RAM не создаёт увеличение OSOS или файлового раздела. PCM ring уже
+запрашивает память у штатного heap через `+0x25a974` и возвращает её через
+`+0x25a8f4`; реальное число доступных байт нужно проверять во время playback.
+256-КБ FSbuf backing range при этом остаётся собственностью штатного потока A.
+
+`tools/build_crossfade_osos_candidate.py` теперь ставит ARM `BL` на
+`OSOS+0xec340` к resource-reset gate и сверяет исходный target `0x101332a8`.
+Offline OSOS SHA-256: `604a7feed84fce980493e4ff0ee6b1a9bbc01399ae332e5887a54f713456d2d6`;
+структурно проверенный partition SHA-256:
+`85e6b71a4e68feead91dbf700394f2882dad35f91122d859273abdafabaffd70`.
+Это расширяет экспериментальный путь второго resource, но B helper ещё не
+подключён к track selection, registry/cache и настоящий file stream не
+исполнялись, а владение RAM окна кода не проверено на устройстве. Образ не готов
+к установке.
