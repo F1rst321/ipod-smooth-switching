@@ -4,6 +4,7 @@
 
 import ghidra.app.script.GhidraScript;
 import ghidra.program.model.address.Address;
+import ghidra.program.model.listing.Instruction;
 import ghidra.program.model.listing.Function;
 import ghidra.program.model.symbol.Reference;
 import ghidra.program.model.symbol.ReferenceIterator;
@@ -42,8 +43,19 @@ public class FindRetailRangeReferences extends GhidraScript {
             ReferenceIterator references = currentProgram.getReferenceManager().getReferencesTo(address);
             while (references.hasNext()) {
                 Reference reference = references.next();
-                println(String.format("XREF OSOS+0x%06x <- %s (%s)", offset,
-                        reference.getFromAddress(), reference.getReferenceType()));
+                Address from = reference.getFromAddress();
+                Function sourceFunction = currentProgram.getFunctionManager()
+                        .getFunctionContaining(from);
+                Instruction sourceInstruction = currentProgram.getListing().getInstructionAt(from);
+                String functionName = sourceFunction == null
+                        ? "<no function>"
+                        : String.format("OSOS+0x%06x", sourceFunction.getEntryPoint().getOffset() - BASE);
+                String instruction = sourceInstruction == null
+                        ? "<no instruction>"
+                        : sourceInstruction.toString();
+                println(String.format("XREF OSOS+0x%06x <- OSOS+0x%06x (%s; %s; %s)", offset,
+                        from.getOffset() - BASE, reference.getReferenceType(), functionName,
+                        instruction));
                 referenceHits++;
             }
         }

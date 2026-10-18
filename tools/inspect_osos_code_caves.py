@@ -3,6 +3,7 @@
 
 The report is read-only. A zero-filled range is only a static code-space
 candidate; it does not prove that the corresponding RAM is unused at runtime.
+The scanner does not parse OSOS-to-IRAM overlays or indirect references.
 """
 from __future__ import annotations
 
@@ -17,6 +18,19 @@ EXPECTED_PARTITION_SIZE = 98_574_336
 EXPECTED_PARTITION_SHA256 = "010bda520671d86a5a2cb010b57ee4484c980e54d97eb3e12621e08cde0423a3"
 EXPECTED_OSOS_SHA256 = "784ae3d5540fd2f89e8c947b93629e97f62a06dc311d9745aab143e4db6bb251"
 OSOS_RAM_BASE = 0x10000000
+KNOWN_OSOS_TO_IRAM_COPIES = (
+    (0x719B00, 0x71A80C, "provider 0"),
+    (0x71A80C, 0x71EE84, "provider 0"),
+    (0x71EE84, 0x72292C, "provider 0"),
+    (0x723594, 0x7235F8, "provider 2"),
+    (0x7235F8, 0x72960C, "provider 2"),
+    (0x72B704, 0x72DC04, "provider 3"),
+    (0x72DC04, 0x731ED4, "provider 3"),
+    (0x731ED4, 0x7326C4, "provider 3"),
+    (0x72960C, 0x72B704, "provider 4"),
+    (0x7335CC, 0x7358C0, "runtime helper"),
+)
+PROVISIONAL_CODE_WINDOW = (0x712000, 0x7161A4)
 
 
 def extract_component(
@@ -105,14 +119,32 @@ def main() -> int:
 
     print(f"Pinned partition verified: {len(partition):,} bytes; SHA-256 {partition_hash}")
     print(f"OSOS verified: {len(osos):,} bytes; SHA-256 {osos_hash}")
+    window_start, window_end = PROVISIONAL_CODE_WINDOW
+    window_overlays = sorted({
+        name for copy_start, copy_end, name in KNOWN_OSOS_TO_IRAM_COPIES
+        if window_start < copy_end and copy_start < window_end
+    })
+    window_words = find_address_words(osos, window_start, window_end)
+    window_snapshot_match = ram_snapshot[window_start:window_end] == osos[window_start:window_end]
+    print(f"Provisional window OSOS+0x{window_start:06x}..+0x{window_end:06x}: "
+          f"{window_end - window_start:,} bytes; all zero={not any(osos[window_start:window_end])}; "
+          f"HIBE bytes match={window_snapshot_match}; "
+          f"address-like words={len(window_words)}; "
+          f"known OSOS-to-IRAM copies={', '.join(window_overlays) if window_overlays else 'none known'}")
     print(f"All-zero ranges in OSOS >= {args.minimum_size:,} bytes: {len(runs)}")
     for start, end in runs[:args.limit]:
         candidates = find_address_words(osos, start, end)
         snapshot_match = ram_snapshot[start:end] == osos[start:end]
+        overlay_names = sorted({
+            name for copy_start, copy_end, name in KNOWN_OSOS_TO_IRAM_COPIES
+            if start < copy_end and copy_start < end
+        })
+        overlays = ", ".join(overlay_names) if overlay_names else "none known"
         print(f"  OSOS+0x{start:06x}..+0x{end:06x}: {end - start:,} bytes; "
               f"RAM 0x{OSOS_RAM_BASE + start:08x}..0x{OSOS_RAM_BASE + end:08x}; "
               f"HIBE bytes match={snapshot_match}; "
-              f"address-like words={len(candidates)}")
+              f"address-like words={len(candidates)}; "
+              f"known OSOS-to-IRAM copies={overlays}")
         for source, value in candidates[:12]:
             print(f"    word at OSOS+0x{source:06x} = 0x{value:08x} "
                   f"(candidate target OSOS+0x{value - OSOS_RAM_BASE:06x})")
@@ -121,6 +153,7 @@ def main() -> int:
 
     print("Address-like words may be packed data or constants; verify code/data xrefs separately.")
     print("A zero-filled file range and one matching HIBE snapshot do not certify free runtime RAM.")
+    print("Overlay copy/clear ranges and indirect references are not analyzed by this scanner.")
     print("Read-only analysis only: no image is written and no physical disk is accessed.")
     return 0
 
