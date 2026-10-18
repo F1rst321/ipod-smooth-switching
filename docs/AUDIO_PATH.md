@@ -943,9 +943,13 @@ slot 5, сохранив выход A; и где добавить consumer, ко
 `+0x23eb30`, `+0x23f8dc` и другие), поэтому сам факт пробуждения worker-а
 пока не равен подтверждённому «I²S запросил следующий PCM-блок». Типы событий,
 которые непосредственно выставляют `queue+0xc8`, ещё нужно связать с их
-источником. Read-only декомпиляции: `build/ghidra-audio-worker-event-trigger.log`,
+источником. Дополнительный поиск цепочек `ADD` → `STR*` нашёл один кандидат
+для смещения `0xc8` в `+0x16f7dc`; декомпиляция показывает конструирование
+другого вложенного объекта и не связывает его с `TPCMQUEUE`, поэтому он
+исключён. Read-only декомпиляции: `build/ghidra-audio-worker-event-trigger.log`,
 `build/ghidra-audio-worker-event-senders.log` и
-`build/ghidra-audio-worker-message-type.log`.
+`build/ghidra-audio-worker-message-type.log`; результат поиска кандидата —
+`build/ghidra-queue-flag-candidate.log`.
 
 ## Независимые пределы эмуляции
 
