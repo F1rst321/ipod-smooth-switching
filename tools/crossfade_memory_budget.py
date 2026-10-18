@@ -21,7 +21,8 @@ VOICE_DESCRIPTOR_MIN_BYTES = 0x4C
 TRACK_RESOURCE_BYTES = 700
 MP3_SYNC_OBJECT_MIN_BYTES = 0xA4
 MP3_SYNC_WORKER_STACK_BYTES = 0x700
-PLAYER_CONTEXT_PREFIX_BYTES = 0x29E0
+TRACK_OPEN_PLAYER_PREFIX_BYTES = 0x29E0
+ISOLATED_STREAM_PARENT_BYTES = 0x90C8
 PCM_RING_HEADER_BYTES = 20
 IDLE_HIBE_LARGEST_FREE_BLOCK_BYTES = 4_641_944
 
@@ -60,6 +61,7 @@ def main() -> int:
     streaming_subtotal = (b_private_state_bytes + TRACK_RESOURCE_BYTES
                           + ring_storage_bytes + descriptor_bytes
                           + b_sync_control_bytes)
+    isolated_parent_subtotal = streaming_subtotal + ISOLATED_STREAM_PARENT_BYTES
     queued_seconds = args.queued_blocks * args.block_frames / args.sample_rate
     print(f"PCM format: {args.sample_rate} Hz, {args.channels} channels, "
           f"{args.bits_per_sample}-bit; {block_bytes:,} bytes/block")
@@ -78,14 +80,18 @@ def main() -> int:
     print(f"Minimum descriptor extent: {VOICE_DESCRIPTOR_MIN_BYTES} bytes each "
           f"= {descriptor_bytes:,} bytes; candidate streaming budget: "
           f"{streaming_subtotal:,} bytes with the isolated-workspace candidate")
-    print(f"If isolating the track-open routine needs a shadow player, its observed "
-          f"field extent is at least {PLAYER_CONTEXT_PREFIX_BYTES:,} bytes; the full "
-          "object size and ownership are unknown, so this is not included.")
+    print(f"If B gets an isolated RMIprimary/FSbuf parent, the constructor writes "
+          f"through parent+0x90c5; aligned minimum extent {ISOLATED_STREAM_PARENT_BYTES:,} "
+          f"bytes, subtotal with this candidate: "
+          f"{isolated_parent_subtotal:,} bytes. Full object size/ownership are unknown.")
+    print(f"The track-open path separately reaches player+0x29dc; its observed "
+          f"prefix is {TRACK_OPEN_PLAYER_PREFIX_BYTES:,} bytes, but the decoder "
+          "worker needs the larger parent prefix above if that state is cloned.")
     print("Queue duration is buffering depth, not the selected crossfade duration. "
           "The voice descriptor's observed fields reach +0x48; its full allocation "
           "size is not known.")
     print("seconds  raw_pcm  whole_blocks  aligned_pcm  pcm_plus_B_context  "
-          "two_pcm_queues_plus_B_context")
+          "two_pcm_queues_plus_B_context  two_queues_plus_parent_candidate")
     for seconds in range(3, 11):
         frames = seconds * args.sample_rate
         raw_bytes = frames * bytes_per_frame
@@ -94,14 +100,15 @@ def main() -> int:
         combined_bytes = aligned_bytes + b_private_state_bytes + b_sync_control_bytes
         two_queue_bytes = (2 * aligned_bytes + b_private_state_bytes
                            + b_sync_control_bytes)
+        two_queue_parent_bytes = two_queue_bytes + ISOLATED_STREAM_PARENT_BYTES
         print(f"{seconds:>7}  {raw_bytes:>8,}  {blocks:>12,}  "
               f"{aligned_bytes:>11,}  {combined_bytes:>16,}  "
-              f"{two_queue_bytes:>29,}")
+              f"{two_queue_bytes:>29,}  {two_queue_parent_bytes:>32,}")
     max_fade_frames = 10 * args.sample_rate
     max_fade_blocks = math.ceil(max_fade_frames / args.block_frames)
     max_fade_pcm = max_fade_blocks * block_bytes
     max_fade_candidate = (2 * max_fade_pcm + b_private_state_bytes
-                          + b_sync_control_bytes)
+                          + b_sync_control_bytes + ISOLATED_STREAM_PARENT_BYTES)
     print(f"10-second two-queue subtotal vs saved idle HIBE largest block: "
           f"{max_fade_candidate:,}/{args.idle_largest_free:,} bytes; "
           f"snapshot-only headroom {args.idle_largest_free - max_fade_candidate:,} bytes")
@@ -110,8 +117,10 @@ def main() -> int:
           "allocation. They include one minimum callback/queue object and the "
           "MP3 queue's configured 0x700-byte worker stack as candidate costs. "
           "They exclude file/stream cache, PCM descriptors, extra DMA handoff "
-          "storage, allocator overhead, and runtime heap pressure. "
-          "The two-queue column counts two aligned PCM buffers plus that candidate B state. "
+          "storage, allocator overhead, and runtime heap pressure. The final "
+          "column adds the observed minimum RMIprimary/FSbuf parent extent, not a "
+          "validated second instance. The two-queue columns count two aligned PCM buffers plus "
+          "that candidate B state. "
           "The HIBE comparison is not a playback-time capacity guarantee.")
     print("Audio-path integration and availability during playback remain "
           "unverified.")
