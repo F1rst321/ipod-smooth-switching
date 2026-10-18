@@ -84,6 +84,71 @@ def find_address_words(
     return matches
 
 
+def arm_immediate(word: int) -> int:
+    """Decode ARM's rotated 8-bit immediate operand."""
+    value = word & 0xFF
+    rotate = 2 * ((word >> 8) & 0xF)
+    if rotate == 0:
+        return value
+    return ((value >> rotate) | (value << (32 - rotate))) & 0xFFFFFFFF
+
+
+def find_arm_reference_candidates(
+    osos: bytes,
+    start: int,
+    end: int,
+) -> list[tuple[int, str, int]]:
+    """Find syntactic ARM references whose targets fall inside a window.
+
+    This scans aligned words across the image and can report instructions
+    embedded in data. It intentionally does not interpret Thumb code,
+    relocation tables, or computed/indirect references.
+    """
+    matches: set[tuple[int, str, int]] = set()
+    for source in range(0, len(osos) - 3, 4):
+        word = int.from_bytes(osos[source:source + 4], "little")
+        if word >> 28 == 0xF:
+            continue
+
+        # ARM B/BL: PC is the current instruction address plus eight bytes.
+        if word & 0x0E000000 == 0x0A000000:
+            displacement = word & 0x00FFFFFF
+            if displacement & 0x00800000:
+                displacement -= 0x01000000
+            target = source + 8 + (displacement << 2)
+            if start <= target < end:
+                matches.add((source, "B/BL", target))
+
+        # ADD/SUB Rd, PC, #imm (ADR-style computed address).
+        if ((word >> 25) & 0x7) == 0x1 and ((word >> 16) & 0xF) == 0xF:
+            opcode = (word >> 21) & 0xF
+            if opcode in (2, 4):
+                delta = arm_immediate(word)
+                target = source + 8 + (delta if opcode == 4 else -delta)
+                if start <= target < end:
+                    matches.add((source, "ADR", target))
+
+        # ARM LDR literal, including a word in the window containing a pointer
+        # into the same window or its absolute RAM address.
+        if word & 0x0F7F0000 == 0x051F0000:
+            delta = word & 0xFFF
+            literal = source + 8 + (delta if (word >> 23) & 1 else -delta)
+            if 0 <= literal <= len(osos) - 4:
+                value = int.from_bytes(osos[literal:literal + 4], "little")
+                if start <= literal < end:
+                    matches.add((source, "LDR literal", literal))
+                if start <= value < end or 0x10000000 + start <= value < 0x10000000 + end:
+                    matches.add((source, "LDR pointer", value))
+
+    # Include data pointers even when the corresponding source word is not
+    # referenced by an ARM LDR instruction.
+    for source in range(0, len(osos) - 3, 4):
+        value = int.from_bytes(osos[source:source + 4], "little")
+        if start <= value < end or 0x10000000 + start <= value < 0x10000000 + end:
+            matches.add((source, "pointer word", value))
+    return sorted(matches)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("backup", type=Path, help="pinned stock firmware partition backup")
@@ -125,12 +190,22 @@ def main() -> int:
         if window_start < copy_end and copy_start < window_end
     })
     window_words = find_address_words(osos, window_start, window_end)
+    window_refs = find_arm_reference_candidates(osos, window_start, window_end)
     window_snapshot_match = ram_snapshot[window_start:window_end] == osos[window_start:window_end]
     print(f"Provisional window OSOS+0x{window_start:06x}..+0x{window_end:06x}: "
           f"{window_end - window_start:,} bytes; all zero={not any(osos[window_start:window_end])}; "
           f"HIBE bytes match={window_snapshot_match}; "
           f"address-like words={len(window_words)}; "
           f"known OSOS-to-IRAM copies={', '.join(window_overlays) if window_overlays else 'none known'}")
+    print(f"Syntactic ARM/pointer reference candidates into provisional window: {len(window_refs)}")
+    for source, kind, target in window_refs[:40]:
+        if 0x10000000 <= target < 0x10000000 + len(osos):
+            target_text = f"RAM 0x{target:08x} (OSOS+0x{target - 0x10000000:06x})"
+        else:
+            target_text = f"OSOS+0x{target:06x}"
+        print(f"  source OSOS+0x{source:06x}: {kind} -> {target_text}")
+    if len(window_refs) > 40:
+        print(f"  ... {len(window_refs) - 40} more candidates")
     print(f"All-zero ranges in OSOS >= {args.minimum_size:,} bytes: {len(runs)}")
     for start, end in runs[:args.limit]:
         candidates = find_address_words(osos, start, end)
@@ -152,6 +227,7 @@ def main() -> int:
             print(f"    ... {len(candidates) - 12} more candidate words")
 
     print("Address-like words may be packed data or constants; verify code/data xrefs separately.")
+    print("ARM reference candidates are syntactic only; Thumb and indirect references are omitted.")
     print("A zero-filled file range and one matching HIBE snapshot do not certify free runtime RAM.")
     print("Overlay copy/clear ranges and indirect references are not analyzed by this scanner.")
     print("Read-only analysis only: no image is written and no physical disk is accessed.")
