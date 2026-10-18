@@ -204,6 +204,7 @@ def main() -> int:
     machine.mem_write(FILE_BUFFER_B_ADDRESS, file_data_b)
 
     last_pcs: list[int] = []
+    last_call_instruction_count = [0]
     stream_positions = {0x20030000: 0, 0x2003A000: 0}
     stream_object = 0x20030000
     stream_b_object = 0x2003A000
@@ -255,6 +256,7 @@ def main() -> int:
     machine.mem_write(ITEM_B_ADDRESS + 0x3B9C, struct.pack("<I", stream_b_object))
 
     def code_hook(uc, address, _size, _user_data):
+        last_call_instruction_count[0] += 1
         last_pcs.append(address)
         if len(last_pcs) > 30:
             last_pcs.pop(0)
@@ -378,6 +380,7 @@ def main() -> int:
     machine.hook_add(UC_HOOK_INTR, lambda uc, _intno, _user: uc.reg_write(UC_ARM_REG_R0, 0))
 
     def call(address: int, registers: tuple[int, ...]) -> int:
+        last_call_instruction_count[0] = 0
         for register, value in zip(
             (UC_ARM_REG_R0, UC_ARM_REG_R1, UC_ARM_REG_R2, UC_ARM_REG_R3), registers
         ):
@@ -403,6 +406,7 @@ def main() -> int:
         registers: tuple[int, ...],
         stack_args: tuple[int, ...] = (),
     ) -> int:
+        last_call_instruction_count[0] = 0
         for register, value in zip(
             (UC_ARM_REG_R0, UC_ARM_REG_R1, UC_ARM_REG_R2, UC_ARM_REG_R3),
             registers,
@@ -461,8 +465,15 @@ def main() -> int:
     reader_positions[reader_object] = audio_offset
     reader_positions[reader_b_object] = audio_offset_b
 
-    worker_returns = [call(0x4000AE10, (item, OUTPUT_ADDRESS, PCM_BYTES))
-                      for _ in range(3)]
+    worker_a_instructions: list[int] = []
+    worker_a_nonzero_samples: list[int] = []
+    worker_returns = []
+    for _ in range(3):
+        worker_returns.append(call(0x4000AE10, (item, OUTPUT_ADDRESS, PCM_BYTES)))
+        worker_a_instructions.append(last_call_instruction_count[0])
+        block = bytes(machine.mem_read(OUTPUT_ADDRESS, PCM_BYTES))
+        block_samples = struct.unpack("<" + "h" * (len(block) // 2), block)
+        worker_a_nonzero_samples.append(sum(sample != 0 for sample in block_samples))
     if worker_returns != [1, 1, 1]:
         raise RuntimeError(f"Unexpected A worker results: {worker_returns}")
     if machine.mem_read(item + 0x3BC8, 1)[0]:
@@ -486,11 +497,18 @@ def main() -> int:
     machine.mem_write(active_item_cell, struct.pack("<I", ITEM_B_ADDRESS + 0x44))
     machine.mem_write(0x4000248C, struct.pack("<I", output_b))
     machine.mem_write(0x40002510, struct.pack("<I", output_b))
-    worker_b_returns = [
-        call(0x4000AE10, (ITEM_B_ADDRESS, output_b, PCM_BYTES))
-        for _ in range(3)
-    ]
-    if worker_b_returns != [1, 1, 1]:
+    worker_b_instructions: list[int] = []
+    worker_b_nonzero_samples: list[int] = []
+    worker_b_returns = []
+    for _ in range(4):
+        worker_b_returns.append(
+            call(0x4000AE10, (ITEM_B_ADDRESS, output_b, PCM_BYTES))
+        )
+        worker_b_instructions.append(last_call_instruction_count[0])
+        block = bytes(machine.mem_read(output_b, PCM_BYTES))
+        block_samples = struct.unpack("<" + "h" * (len(block) // 2), block)
+        worker_b_nonzero_samples.append(sum(sample != 0 for sample in block_samples))
+    if worker_b_returns != [1] * 4:
         raise RuntimeError(f"Unexpected B worker results: {worker_b_returns}")
     if machine.mem_read(ITEM_B_ADDRESS + 0x3BC8, 1)[0]:
         raise RuntimeError("Stock MP3 worker set item B's failure flag")
@@ -582,17 +600,22 @@ def main() -> int:
     print("PASS: stock provider-0 worker decoded A, then B, then resumed A in emulation")
     print(f"  A input: {args.mp3} ({len(file_data):,} bytes; audio offset {audio_offset})")
     print(f"  A worker returns: {worker_returns}")
+    print(f"  A emulated instruction count per call: {worker_a_instructions}")
+    print(f"  A nonzero output samples after each call: {worker_a_nonzero_samples}")
     print(f"  A PCM16 stereo block: {sum(value != 0 for value in samples)}/{len(samples)} "
           f"nonzero samples; range {min(samples)}..{max(samples)}")
     print(f"  A tone estimate: {estimated_hz:.2f} Hz; A resume: {resume_hz:.2f} Hz")
     print(f"  B input: {args.mp3_b} ({len(file_data_b):,} bytes; audio offset {audio_offset_b})")
     print(f"  B worker returns: {worker_b_returns}")
+    print(f"  B emulated instruction count per call: {worker_b_instructions}")
+    print(f"  B nonzero output samples after each call: {worker_b_nonzero_samples}")
     print(f"  B PCM16 stereo block: {sum(value != 0 for value in samples_b)}/{len(samples_b)} "
           f"nonzero; range {min(samples_b)}..{max(samples_b)}")
     print("  PASS: B used its cloned synthesis history; A item and history stayed intact")
     print(f"  PASS: ARM mixer combined decoded A/B PCM for {mixed_frames} frames "
           f"inside a three-second fade ({mixer_state[1]}/{mixer_state[0]} frames done)")
-    print("  Scope: callbacks are dispatched synchronously at an idle queue boundary; "
+    print("  Scope: instruction counts are emulator counts, not measured CPU cycles. "
+          "Callbacks are dispatched synchronously at an idle queue boundary; "
           "file I/O, queue scheduling, and MMIO are mocked. No physical playback.")
     return 0
 
