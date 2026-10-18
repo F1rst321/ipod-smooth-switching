@@ -129,6 +129,14 @@ py .\tools\inspect_firmware_partition.py --image .\firmware\ipod_video_5.5g_30gb
 
 This checks each directory entry's bounds and reports whether the stored checksum field matches a simple byte sum; the field may use a different meaning for some image types.
 
+To inspect the RetailOS heap free list saved in the HIBE snapshot:
+
+```powershell
+py .\tools\inspect_hibe_heap.py .\firmware\ipod_video_5.5g_30gb_stock_partition1.img
+```
+
+This validates the saved allocator links and reports its free blocks. It is a read-only audit of one saved state; it does not promise the same free memory during playback.
+
 To compare the raw bytes of the backup and IPSW payload without extracting either file, run:
 
 ```powershell
@@ -139,4 +147,4 @@ Firmware images and device backups stay under `firmware/`, which Git ignores; on
 
 ## What is ready
 
-The project currently contains the UI concept, read-only backup and firmware inspection tools, a component-level comparison of the stock device backup against Apple's IPSW, a verified computer-side WAV crossfade prototype, and a structurally checked offline image builder. The visual is a mockup only. No crossfade code has been inserted into RetailOS, and there is no installable firmware image yet: the music PCM mixing point and the stock menu/settings integration have not been identified and validated. The image builder cannot establish audio or UI behavior.
+The project currently contains the UI concept, read-only backup and firmware inspection tools (including an HIBE heap free-list audit), a component-level comparison of the stock device backup against Apple's IPSW, a verified computer-side WAV crossfade prototype, and a structurally checked offline image builder. The visual is a mockup only. No crossfade code has been inserted into RetailOS, and there is no installable firmware image yet: the music PCM mixing point and the stock menu/settings integration have not been identified and validated. The image builder cannot establish audio or UI behavior.
