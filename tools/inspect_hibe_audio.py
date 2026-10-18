@@ -171,6 +171,49 @@ def inspect_audio_provider_registry(snapshot: Snapshot) -> None:
                   "outside captured RAM")
 
 
+def inspect_decoder_service_registry(snapshot: Snapshot) -> None:
+    """Report the shared 15-slot service registry used by the MP3 item opener.
+
+    The HIBE snapshot is one saved runtime state. Slot 5 is the service object
+    requested by the stock MP3 item-opening path; it is not a count of track
+    decoders and does not establish whether custom code could add another one.
+    """
+    state_global = 0x10936B40
+    if not RAM_BASE <= state_global < RAM_BASE + RAM_SIZE - 4:
+        print("Decoder service registry global is outside captured RAM")
+        return
+
+    state_alias = snapshot.u32(state_global)
+    state = snapshot.native_ram_address(state_alias)
+    if not RAM_BASE <= state < RAM_BASE + RAM_SIZE - 8:
+        print(f"Decoder service state pointer 0x{state_alias:08x} is outside captured RAM")
+        return
+
+    manager_alias = snapshot.u32(state + 4)
+    manager = snapshot.native_ram_address(manager_alias)
+    if not RAM_BASE <= manager < RAM_BASE + RAM_SIZE - 0x108:
+        print(f"Decoder service manager pointer 0x{manager_alias:08x} is outside captured RAM")
+        return
+
+    print(f"Decoder service state RAM 0x{state:08x}; manager "
+          f"0x{manager_alias:08x} (native 0x{manager:08x})")
+    print(f"  manager vtable=0x{snapshot.u32(manager):08x}; "
+          f"lock field +0x104=0x{snapshot.u32(manager + 0x104):08x}")
+    for index in range(15):
+        entry = manager + 4 + index * 0x10
+        object_alias = snapshot.u32(entry)
+        service_id = snapshot.u32(entry + 4)
+        flag = snapshot.read(manager + 0x10 + index * 0x10, 1)[0]
+        if object_alias == 0 and flag == 0:
+            continue
+        object_address = snapshot.native_ram_address(object_alias) if object_alias else 0
+        vtable = snapshot.u32(object_address) if object_address and (
+            RAM_BASE <= object_address < RAM_BASE + RAM_SIZE - 4
+        ) else 0
+        print(f"  slot {index}: registry value={service_id}, object=0x{object_alias:08x}, "
+              f"vtable=0x{vtable:08x}, state-flag={flag}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("image", type=Path, help="read-only firmware partition backup")
@@ -239,6 +282,7 @@ def main() -> int:
         print(f"RMIprimary task object not confirmed at RAM 0x{primary_task:08x}")
 
     inspect_audio_provider_registry(snapshot)
+    inspect_decoder_service_registry(snapshot)
 
     # TPCMQUEUE's provider is separate from the file wrapper.  Its descriptor
     # array points into a preallocated buffer region.  Report descriptor and
