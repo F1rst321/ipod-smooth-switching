@@ -56,6 +56,9 @@ calls from its OSOS bytes can point to different functions at runtime; use
 callee. The verified example is in
 [`docs/AUDIO_XREF_NOTES.md`](docs/AUDIO_XREF_NOTES.md#коррекция-прямых-вызовов-в-iram).
 
+The distinction between growing the firmware file and reserving runtime PCM
+memory is documented in [`docs/RUNTIME_BUFFER_PLAN.md`](docs/RUNTIME_BUFFER_PLAN.md).
+
 For a host-side demonstration of the mixing algorithm, use two uncompressed 16-bit WAV files with the same sample rate and channel count:
 
 ```powershell
