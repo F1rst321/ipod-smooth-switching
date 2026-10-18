@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Estimate PCM look-ahead and known private B-side state for crossfade.
+"""Estimate PCM look-ahead and a small streaming queue for crossfade.
 
 This is a capacity calculator only. It does not inspect or modify firmware,
 allocate target memory, or claim that the RetailOS audio path can use a ring
-buffer of the reported size. The combined estimate includes only the documented
-MP3 item and private filter history; file, cache, and allocator overhead are
-not included.
+buffer of the reported size. The streaming estimate includes only the
+documented MP3 item, private filter history, PCM blocks, and the observed
+minimum source-descriptor extent; file, cache, and allocator overhead are not
+included.
 """
 from __future__ import annotations
 
@@ -14,6 +15,7 @@ import math
 
 MP3_ITEM_BYTES = 0x3BEC
 FILTER_HISTORY_BYTES = 0x1110
+VOICE_DESCRIPTOR_MIN_BYTES = 0x4C
 
 
 def main() -> int:
@@ -26,9 +28,11 @@ def main() -> int:
                         help="PCM sample width (default: 16)")
     parser.add_argument("--block-frames", type=int, default=1_152,
                         help="frames per firmware PCM block (default: 1152)")
+    parser.add_argument("--queued-blocks", type=int, default=4,
+                        help="candidate B PCM queue depth (default: 4 blocks)")
     args = parser.parse_args()
     if min(args.sample_rate, args.channels, args.bits_per_sample,
-           args.block_frames) <= 0:
+           args.block_frames, args.queued_blocks) <= 0:
         parser.error("all format and block dimensions must be positive")
     if args.bits_per_sample % 8:
         parser.error("bits per sample must be a whole number of bytes")
@@ -36,10 +40,22 @@ def main() -> int:
     bytes_per_frame = args.channels * (args.bits_per_sample // 8)
     block_bytes = args.block_frames * bytes_per_frame
     b_private_state_bytes = MP3_ITEM_BYTES + FILTER_HISTORY_BYTES
+    queued_pcm_bytes = args.queued_blocks * block_bytes
+    descriptor_bytes = args.queued_blocks * VOICE_DESCRIPTOR_MIN_BYTES
+    streaming_subtotal = b_private_state_bytes + queued_pcm_bytes + descriptor_bytes
+    queued_seconds = args.queued_blocks * args.block_frames / args.sample_rate
     print(f"PCM format: {args.sample_rate} Hz, {args.channels} channels, "
           f"{args.bits_per_sample}-bit; {block_bytes:,} bytes/block")
     print(f"Known private B state: MP3 item {MP3_ITEM_BYTES:,} + filter history "
           f"{FILTER_HISTORY_BYTES:,} = {b_private_state_bytes:,} bytes")
+    print(f"Streaming queue candidate: {args.queued_blocks} B blocks = "
+          f"{queued_pcm_bytes:,} PCM bytes ({queued_seconds:.3f} s of queued audio)")
+    print(f"Minimum descriptor extent: {VOICE_DESCRIPTOR_MIN_BYTES} bytes each "
+          f"= {descriptor_bytes:,} bytes; known streaming subtotal: "
+          f"{streaming_subtotal:,} bytes")
+    print("Queue duration is buffering depth, not the selected crossfade duration. "
+          "The voice descriptor's observed fields reach +0x48; its full allocation "
+          "size is not known.")
     print("seconds  raw_pcm  whole_blocks  aligned_pcm  pcm_plus_B_state")
     for seconds in range(3, 11):
         frames = seconds * args.sample_rate
