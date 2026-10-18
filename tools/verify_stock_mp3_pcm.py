@@ -232,18 +232,9 @@ def main() -> int:
     service_object = 0x20034000
     service_vtable = 0x20035000
     service_stub_base = 0x200E1000
-    reader_object = 0x20036000
-    reader_b_object = 0x20038000
-    reader_vtable = 0x20037000
-    reader_stub_base = 0x200E2000
     method_offsets = (0x00, 0x08, 0x0C, 0x10, 0x18, 0x20, 0x24, 0x28)
     callback_returns: list[tuple[int, int]] = []
     service_method_calls: list[int] = []
-    reader_positions = {reader_object: 0, reader_b_object: 0}
-    reader_inputs = {
-        reader_object: (file_data, FILE_BUFFER_ADDRESS),
-        reader_b_object: (file_data_b, FILE_BUFFER_B_ADDRESS),
-    }
     stream_inputs = {
         stream_object: (file_data, FILE_BUFFER_ADDRESS),
         stream_b_object: (file_data_b, FILE_BUFFER_B_ADDRESS),
@@ -261,10 +252,6 @@ def main() -> int:
     machine.mem_write(service_object, struct.pack("<I", service_vtable))
     machine.mem_write(service_vtable + 0x30, struct.pack("<I", service_stub_base))
     machine.mem_write(service_vtable + 0x3C, struct.pack("<I", service_stub_base + 0x20))
-    machine.mem_write(reader_object, struct.pack("<I", reader_vtable))
-    machine.mem_write(reader_b_object, struct.pack("<I", reader_vtable))
-    machine.mem_write(reader_vtable + 0x08, struct.pack("<I", reader_stub_base))
-    machine.mem_write(reader_vtable + 0x0C, struct.pack("<I", reader_stub_base + 0x20))
     metadata_words = [128000, SAMPLE_RATE, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0]
     machine.mem_write(metadata, struct.pack("<12I", *metadata_words))
     machine.mem_write(parent + 0x297C, b"\0")
@@ -316,32 +303,6 @@ def main() -> int:
             return
         if address in (0x4001D000, 0x4001D050, 0x4001D0CC):
             uc.reg_write(UC_ARM_REG_R0, 0)
-            uc.reg_write(UC_ARM_REG_PC, uc.reg_read(UC_ARM_REG_LR))
-            return
-        if address == reader_stub_base:
-            reader = uc.reg_read(UC_ARM_REG_R0)
-            reader_position = reader_positions[reader]
-            source_data, _source_buffer = reader_inputs[reader]
-            destination = uc.reg_read(UC_ARM_REG_R1)
-            requested = uc.reg_read(UC_ARM_REG_R2)
-            count = min(requested, len(source_data) - reader_position)
-            if count > 0:
-                uc.mem_write(
-                    destination,
-                    source_data[reader_position:reader_position + count],
-                )
-                reader_position += count
-            reader_positions[reader] = reader_position
-            uc.reg_write(UC_ARM_REG_R0, count)
-            uc.reg_write(UC_ARM_REG_PC, uc.reg_read(UC_ARM_REG_LR))
-            return
-        if address == reader_stub_base + 0x20:
-            reader = uc.reg_read(UC_ARM_REG_R0)
-            source_data, _source_buffer = reader_inputs[reader]
-            uc.reg_write(
-                UC_ARM_REG_R0,
-                int(reader_positions[reader] < len(source_data)),
-            )
             uc.reg_write(UC_ARM_REG_PC, uc.reg_read(UC_ARM_REG_LR))
             return
         if address == STOP_ADDRESS:
@@ -483,7 +444,9 @@ def main() -> int:
     machine.ctl_remove_cache(service_bypass_address, service_bypass_address + 4)
 
     call(0x4000BC9C, (item + 0x44, 0, 0))
-    call(0x10127DF4, (item, metadata, 0, reader_object))
+    # The stock initializer succeeds with a null fourth argument. The worker's
+    # actual file interface is stored separately at item+0x3b9c below.
+    call(0x10127DF4, (item, metadata, 0, 0))
     if sorted(service_method_calls) != [0, 0x20]:
         raise RuntimeError(
             f"A initialization did not exercise both slot-5 methods: "
@@ -502,8 +465,6 @@ def main() -> int:
     machine.mem_write(0x149EE078 + 0x80, struct.pack("<I", 1))
     stream_positions[stream_object] = audio_offset
     stream_positions[stream_b_object] = audio_offset_b
-    reader_positions[reader_object] = audio_offset
-    reader_positions[reader_b_object] = audio_offset_b
 
     worker_a_instructions: list[int] = []
     worker_a_nonzero_samples: list[int] = []
@@ -545,7 +506,7 @@ def main() -> int:
     call(0x4000BC9C, (ITEM_B_ADDRESS + 0x44, 0, 0))
     service_calls_before_b = len(service_method_calls)
     try:
-        call(0x10127DF4, (ITEM_B_ADDRESS, metadata, 0, reader_b_object))
+        call(0x10127DF4, (ITEM_B_ADDRESS, metadata, 0, 0))
     finally:
         machine.mem_write(service_bypass_address, service_bypass_original)
         machine.ctl_remove_cache(
@@ -600,7 +561,6 @@ def main() -> int:
         machine.mem_read(callback_context_b, CALLBACK_CONTEXT_BYTES)
     )
     stream_positions[stream_b_object] = audio_offset_b
-    reader_positions[reader_b_object] = audio_offset_b
 
     machine.mem_write(0x149EE078 + 0x44, struct.pack("<I", callback_b))
     machine.mem_write(active_item_cell, struct.pack("<I", ITEM_B_ADDRESS + 0x44))
@@ -816,6 +776,10 @@ def main() -> int:
     print(
         "  PASS: payload's B-only service gate preserved A's two stock slot-5 "
         "calls and skipped both for B"
+    )
+    print(
+        "  PASS: A and B item initialization succeeded with param_4=null; "
+        "the actual item+0x3b9c stream objects were supplied manually"
     )
     print("  PASS: A and B each resumed after one interleaved worker call")
     print(

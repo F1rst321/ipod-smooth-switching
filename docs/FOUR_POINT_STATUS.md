@@ -937,16 +937,20 @@ partition также прошли. Полученный OSOS имеет SHA-256
 — `cdbe85661207f6d8a264cade95858f866b0094b82c310c1ffd43735add9c2247`.
 
 После трёх блоков A в эмуляцию добавлена инициализация штатного MP3 item B
-(`0x10127df4`) с отдельным mock reader-ом. Проверено, что она оставляет A item,
-history, active-item, callback, output slots и idle queue без изменений; затем
-worker B декодирует PCM и A продолжает. Реальные track/resource objects,
-service slot 5 и очередь при этом не использовались.
+(`0x10127df4`) с `param_4=0`. Инструментированный повтор показал, что прежний
+mock-объект четвёртого аргумента не использовался; тест теперь его не создаёт.
+Проверено, что инициализация оставляет A item, history, active-item, callback,
+output slots и idle queue без изменений. Worker B затем декодирует PCM через
+отдельный вручную заданный интерфейс `item+0x3b9c`, после чего A продолжает.
+Настоящие track/resource objects, привязка resource stream к этому полю, service
+slot 5 и очередь при этом не использовались.
 
 Это не закрывает запуск B: candidate state по умолчанию выключен, нет связи
 эмулированного item-а с выбранным следующим треком, безопасной runtime resource
-factory, fade-trigger или handoff. Очередь в эмуляции dispatch-ится синхронно,
-file I/O, service slot 5, voice mixer и физический iPod не моделируются. Образ
-остаётся офлайн исследовательским артефактом и не готов к установке.
+factory, привязки настоящего stream к `item+0x3b9c`, fade-trigger или handoff.
+Очередь в эмуляции dispatch-ится синхронно; file I/O, service slot 5, voice
+mixer и физический iPod не моделируются. Образ остаётся офлайн
+исследовательским артефактом и не готов к установке.
 
 ### Проверка обхода двух общих audio-service вызовов для B — 18 октября 2026 года
 
@@ -959,7 +963,7 @@ conditional gate из payload. Gate сравнивает текущий item в 
 
 В готовом candidate pointer B по умолчанию равен нулю, и код, который должен
 установить его перед B initialization, ещё не подключён. Общий sync/event helper,
-service lookup, reader, очередь и MMIO остаются заглушками; проверено лишь, что
+service lookup, file-stream methods, очередь и MMIO остаются заглушками; проверено лишь, что
 условная развилка и worker работают в модели. OSOS SHA-256
 `2a58fb0b3a885e14c2b103a3ca0212b7c44485d4062019020b22bc25cdd62368`; полный
 partition SHA-256
