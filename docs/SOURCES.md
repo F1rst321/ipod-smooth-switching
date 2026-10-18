@@ -1,5 +1,6 @@
 # Источники для разбора
 
+- [Linux4Nano Report, раздел B.2.5](https://files.freemyipod.org/reports/Linux4NanoReport.pdf) — опубликованное аппаратное исследование указывает 32 МиБ SDRAM для iPod Video 5G/5.5G на 30 ГБ и 64 МиБ для модели на 60 ГБ; это используется для интерпретации полного 32-МиБ снимка HIBE.
 - [Rockbox `ipodpatcher.c`](https://github.com/mguentner/rockbox/blob/master/rbutil/ipodpatcher/ipodpatcher.c) — открытая реализация чтения таблицы и размещения образов прошивки iPod.
 - [Rockbox `pcm-pp.c`](https://github.com/Rockbox/rockbox/blob/master/firmware/target/arm/pp/pcm-pp.c) и [`pp5020.h`](https://github.com/Rockbox/rockbox/blob/master/firmware/export/pp5020.h) — первичные открытые исходники драйверов PP502x; использованы для сверки адресов I²S и DMA и аппаратного формата PCM, но код Rockbox не включён в патч.
 - [iPod Classic Firmware Research](https://github.com/giek2000/ipod-classic-firmware-research) — содержит отдельную спецификацию для RetailOS 25.1.3 и документацию по MeCCA. Это независимый сторонний разбор; перед использованием адреса сопоставляются с локальным компонентом OSOS, а описание аудиопути для других моделей не считается доказанным для нашего 5.5G.

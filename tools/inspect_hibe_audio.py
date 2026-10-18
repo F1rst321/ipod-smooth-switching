@@ -255,8 +255,8 @@ def main() -> int:
         print(f"  RAM 0x{address:08x}: {path}")
 
     # The playback object pointer is stored through the uncached SDRAM alias.
-    # HIBE contains only the lower 32 MiB of the 5.5G's 64 MiB SDRAM, so only
-    # report an object body when its normalized address is in that snapshot.
+    # This 30 GB model has 32 MiB of SDRAM, matching the HIBE RAM snapshot.
+    # Keep bounds checks because HIBE still represents only one saved state.
     queue = snapshot.native_ram_address(0x149388B0)
     item_alias = snapshot.u32(queue + 0x78)
     item = snapshot.native_ram_address(item_alias)
