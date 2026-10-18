@@ -1777,13 +1777,20 @@ OSOS и не подтверждают работу двух потоков ил�
 object-ом и размером `0x40000`. Значит, `FSbuf` — общий интерфейс, а назначение
 конкретного parent-а зависит от caller-а и параметров.
 
-MP3 factory `FUN_101a8ff8` записывает `item+0x3b9c = param_2+0x2e60`, но
-источник своего `param_2` при обычном MP3 open и отдельный file handle B пока не
-установлены. Вызов `FUN_1024b5bc` из `RMIprimary` сам по себе не является
-доказанной MP3 factory. Для B нужен подтверждённый MP3-open caller, отдельный
-file handle и проверенное время жизни объекта. Декомпиляция `FUN_1025e148`,
-`FUN_1025e364`, `FUN_1024b5bc` и `FUN_10216b4c` сохранена в ignored
-`build/ghidra-aac-sync-construction-audit-20261018.log` и
+Скан прямых ARM `BL/BLX-immediate` в точном OSOS нашёл один вызов
+`FUN_1024b5bc`: `OSOS+0x25e2c0` из `FUN_1025e148` (`RMIprimary`). Прямых ARM
+`BL/BLX-immediate` к MP3 factory `FUN_101a8ff8` нет. Это согласуется с косвенным
+dispatch или кодом в другом компоненте, но не доказывает, каким образом factory
+вызывается во время playback. Она записывает
+`item+0x3b9c = param_2+0x2e60`, однако источник `param_2` при обычном MP3 open и
+отдельный file handle B пока не установлены. Для B нужен подтверждённый MP3-open
+caller, отдельный file handle и проверенное время жизни объекта.
+
+Скан воспроизводится командой
+`py tools/scan_arm_direct_calls.py build/ghidra-stock-os/osos.bin 0x1024b5bc 0x101a8ff8`.
+Он анализирует только ARM direct calls, не Thumb и не косвенный dispatch.
+Декомпиляция `FUN_1025e148`, `FUN_1025e364`, `FUN_1024b5bc` и `FUN_10216b4c`
+сохранена в ignored `build/ghidra-aac-sync-construction-audit-20261018.log` и
 `build/ghidra-parent-fsbuf-constructor.log`.
 
 Эмулятор проверяет только арифметику адреса, найденную в `FUN_101a8ff8`:

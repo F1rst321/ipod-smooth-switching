@@ -1006,11 +1006,10 @@ stream subobject-ы именно по этой формуле. A→B→A MP3-wor
 очередь и I²S всё ещё не подтверждены.
 
 
-`FUN_1024b5bc` вызывается при настройке `RMIprimary` из `FUN_1025e148` и
-передаёт `parent+0x2e60` в общий `FSbuf` конструктор `FUN_10216b4c`. Отдельный
-инициализатор `mp4_aacdec_sync` находится в `FUN_1025e364`. Этот же `FSbuf`
-используется при создании `TPCMQUEUE` из `FUN_1023f8dc`, поэтому его тип не
-определяет источник данных. Ни один из этих вызовов не доказывает MP3-open
-parent. `FUN_101a8ff8` хранит формулу в MP3 item, но исходный MP3 parent и file
-handle для B ещё не обнаружены. A→B→A эмуляция использует mock parent-ы, file
-callbacks и чтение.
+Скан прямых ARM `BL/BLX-immediate` нашёл вызов `FUN_1024b5bc` из
+`FUN_1025e148` (`RMIprimary`, `OSOS+0x25e2c0`), но прямых ARM-вызовов
+`FUN_101a8ff8` не обнаружено. Косвенный dispatch скан не исключает. `FSbuf`
+используется при создании `TPCMQUEUE` и не идентифицирует источник. Поэтому
+исходный MP3 parent и file handle для B ещё не обнаружены; A→B→A эмуляция
+использует mock parent-ы, file callbacks и чтение. Скан воспроизводится
+`tools/scan_arm_direct_calls.py` и не охватывает Thumb или косвенные вызовы.
