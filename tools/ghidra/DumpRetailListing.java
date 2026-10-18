@@ -3,6 +3,7 @@
 
 import ghidra.app.script.GhidraScript;
 import ghidra.program.model.address.Address;
+import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.Instruction;
 
 public class DumpRetailListing extends GhidraScript {
@@ -25,7 +26,13 @@ public class DumpRetailListing extends GhidraScript {
                 throw new IllegalArgumentException("Invalid offset/count pair: " + args[i] + "," + args[i + 1]);
             }
             Address address = toAddr(BASE + offset);
-            println(String.format("=== OSOS+0x%x (%d instructions) ===", offset, count));
+            Function owner = currentProgram.getFunctionManager().getFunctionContaining(address);
+            Instruction existing = currentProgram.getListing().getInstructionAt(address);
+            String ownerOffset = owner == null
+                    ? "none"
+                    : String.format("OSOS+0x%06x", owner.getEntryPoint().getOffset() - BASE);
+            println(String.format("=== OSOS+0x%x (%d instructions; function=%s; already-defined=%s) ===",
+                    offset, count, ownerOffset, existing != null));
             int emitted = 0;
             while (emitted < count && address.getOffset() < BASE + OSOS_SIZE) {
                 Instruction instruction = currentProgram.getListing().getInstructionAt(address);
