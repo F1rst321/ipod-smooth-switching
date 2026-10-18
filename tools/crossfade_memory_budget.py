@@ -24,6 +24,7 @@ MP3_SYNC_WORKER_STACK_BYTES = 0x700
 TRACK_OPEN_PLAYER_PREFIX_BYTES = 0x29E0
 ISOLATED_STREAM_PARENT_BYTES = 0x90C8
 FSBUF_BACKING_BUFFER_BYTES = 0x40000
+FSBUF_CHUNK_BYTES = 0x8000
 PCM_RING_HEADER_BYTES = 20
 IDLE_HIBE_LARGEST_FREE_BLOCK_BYTES = 4_641_944
 
@@ -43,12 +44,21 @@ def main() -> int:
     parser.add_argument("--idle-largest-free", type=int,
                         default=IDLE_HIBE_LARGEST_FREE_BLOCK_BYTES,
                         help="largest block in the saved idle HIBE snapshot; comparison only")
+    parser.add_argument(
+        "--fsbuf-backing-bytes", type=int,
+        default=FSBUF_BACKING_BUFFER_BYTES,
+        help=("candidate private FSbuf backing size for B (default: 0x40000; "
+              "must be a positive multiple of 0x8000)"),
+    )
     args = parser.parse_args()
     if min(args.sample_rate, args.channels, args.bits_per_sample,
-           args.block_frames, args.queued_blocks, args.idle_largest_free) <= 0:
+           args.block_frames, args.queued_blocks, args.idle_largest_free,
+           args.fsbuf_backing_bytes) <= 0:
         parser.error("all format and block dimensions must be positive")
     if args.bits_per_sample % 8:
         parser.error("bits per sample must be a whole number of bytes")
+    if args.fsbuf_backing_bytes % FSBUF_CHUNK_BYTES:
+        parser.error("--fsbuf-backing-bytes must be a multiple of 0x8000")
 
     bytes_per_frame = args.channels * (args.bits_per_sample // 8)
     block_bytes = args.block_frames * bytes_per_frame
@@ -64,7 +74,7 @@ def main() -> int:
                           + b_sync_control_bytes)
     isolated_parent_subtotal = streaming_subtotal + ISOLATED_STREAM_PARENT_BYTES
     isolated_fsbuf_subtotal = (isolated_parent_subtotal
-                               + FSBUF_BACKING_BUFFER_BYTES)
+                               + args.fsbuf_backing_bytes)
     queued_seconds = args.queued_blocks * args.block_frames / args.sample_rate
     print(f"PCM format: {args.sample_rate} Hz, {args.channels} channels, "
           f"{args.bits_per_sample}-bit; {block_bytes:,} bytes/block")
@@ -88,9 +98,12 @@ def main() -> int:
           f"bytes, subtotal with this candidate: "
           f"{isolated_parent_subtotal:,} bytes. Full object size/ownership are unknown.")
     print(f"If B also needs a private FSbuf backing buffer, stock passes a "
-          f"0x{FSBUF_BACKING_BUFFER_BYTES:x}-byte buffer for this stream; the "
+          f"0x{FSBUF_BACKING_BUFFER_BYTES:x}-byte buffer for this stream. "
+          f"This scenario budgets 0x{args.fsbuf_backing_bytes:x} bytes "
+          f"({args.fsbuf_backing_bytes // FSBUF_CHUNK_BYTES} x "
+          f"0x{FSBUF_CHUNK_BYTES:x}-byte chunks); the "
           f"candidate subtotal becomes {isolated_fsbuf_subtotal:,} bytes. "
-          "The second buffer requirement is not yet validated in playback.")
+          "A smaller second buffer is only a candidate until real reads are validated.")
     print(f"Private-stream candidate vs saved idle HIBE largest block: "
           f"{isolated_fsbuf_subtotal:,}/{args.idle_largest_free:,} bytes; "
           f"snapshot-only headroom "
@@ -114,7 +127,7 @@ def main() -> int:
                            + b_sync_control_bytes)
         two_queue_parent_bytes = two_queue_bytes + ISOLATED_STREAM_PARENT_BYTES
         two_queue_fsbuf_bytes = (two_queue_parent_bytes
-                                 + FSBUF_BACKING_BUFFER_BYTES)
+                                 + args.fsbuf_backing_bytes)
         print(f"{seconds:>7}  {raw_bytes:>8,}  {blocks:>12,}  "
               f"{aligned_bytes:>11,}  {combined_bytes:>16,}  "
               f"{two_queue_bytes:>29,}  {two_queue_parent_bytes:>32,}  "
@@ -124,7 +137,7 @@ def main() -> int:
     max_fade_pcm = max_fade_blocks * block_bytes
     max_fade_candidate = (2 * max_fade_pcm + b_private_state_bytes
                           + b_sync_control_bytes + ISOLATED_STREAM_PARENT_BYTES
-                          + FSBUF_BACKING_BUFFER_BYTES)
+                          + args.fsbuf_backing_bytes)
     print(f"10-second two-queue subtotal vs saved idle HIBE largest block: "
           f"{max_fade_candidate:,}/{args.idle_largest_free:,} bytes; "
           f"snapshot-only headroom {args.idle_largest_free - max_fade_candidate:,} bytes")
@@ -136,8 +149,8 @@ def main() -> int:
           "storage, allocator overhead, and runtime heap pressure. The final "
           "parent column adds the observed minimum RMIprimary/FSbuf extent, not a "
           "validated second instance. The two-queue columns count two aligned PCM buffers plus "
-          "that candidate B state; the final column also adds one private 0x40000-byte "
-          "FSbuf backing-buffer candidate. "
+          "that candidate B state; the final column also adds the configured private "
+          f"0x{args.fsbuf_backing_bytes:x}-byte FSbuf backing-buffer candidate. "
           "The HIBE comparison is not a playback-time capacity guarantee.")
     print("Audio-path integration and availability during playback remain "
           "unverified.")
