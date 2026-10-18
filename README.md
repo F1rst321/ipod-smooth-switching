@@ -146,6 +146,13 @@ py .\tools\verify_b_stream_heap_budget.py
 py .\tools\verify_b_stream_heap_budget.py --fsbuf-backing-bytes 0x40000
 ```
 
+To exercise the stock FSbuf cached-read and consume methods against two local
+MP3 vectors, without opening files or accessing a device:
+
+```powershell
+py .\tools\verify_b_fsbuf_cached_reads.py
+```
+
 This validates the saved allocator links and reports its free blocks. It is a read-only audit of one saved state; it does not promise the same free memory during playback.
 
 To compare the raw bytes of the backup and IPSW payload without extracting either file, run:

@@ -29,6 +29,14 @@ backing. Это подтверждает только capacity снимка пр
 время playback и полный состав B-объектов не подтверждены. Команды приведены в
 [`RUNTIME_BUFFER_PLAN.md`](RUNTIME_BUFFER_PLAN.md).
 
+Новый `tools/verify_b_fsbuf_cached_reads.py` затем вызвал stock
+`OSOS+0x2163c4` и IRAM read/consume методы на двух FSbuf с приватными cache,
+предзаполненными разными MP3-векторами. Все прочитанные байты и оба cursor-а
+совпали с ожиданиями; B не менял содержимое и cursor A. Это не открытие файлов:
+resource handle и async disk refill заменены готовым cache-снимком. Путь от
+выбранного трека через resource-manager open до реального файла всё ещё не
+подтверждён.
+
 **Обновление 18 октября:** подтверждён startup-loader `OSOS+0x8392c`, который
 копирует MP3 sync worker из `OSOS+0x7326c8..0x733ca0` в
 `IRAM 0x4001c8fc..0x4001ded4`. Побайтовое сравнение совпало с сохранённым

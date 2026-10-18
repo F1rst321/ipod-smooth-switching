@@ -2020,3 +2020,19 @@ resource callback-а — в `build/ghidra-fsbuf-resource-open-router-20261019.lo
 Проверены `py -m py_compile tools/crossfade_memory_budget.py`, запуск калькулятора
 с одним chunk и `git diff --check`. Резервная копия не менялась; этот анализ не
 делает offline образ пригодным для установки.
+
+### Stock FSbuf read/consume на двух частных MP3 cache — 19 октября 2026 года
+
+`tools/verify_b_fsbuf_cached_reads.py` строит два отдельных owner/FSbuf через
+штатные allocator и `FUN_1024b5bc`, загружает в их приватные backing chunks
+первые `0x8000` байт двух локальных MP3-векторов и вызывает реальный RetailOS
+bulk-read helper `OSOS+0x2163c4`. Его таблица методов направляет чтение в
+`IRAM 0x4001d24c`, а consume — в `IRAM 0x4001d464`. Проверка сверяет каждый
+возвращённый фрагмент с исходным MP3, подтверждает продвижение собственного
+cursor-а и проверяет, что создание/чтение B не меняет объект, кэш и cursor A.
+
+Это подтверждает работу stock cache-read/consume методов с двумя частными
+FSbuf в эмуляции. Cache в тесте заранее заполнен и помечен готовым; resource-
+manager open, файловое чтение с диска, async refill, MP3 worker через этот
+FSbuf, playback и аппаратный аудиовыход не выполнялись. Результат не является
+проверкой второго музыкального потока или установочным образом.
