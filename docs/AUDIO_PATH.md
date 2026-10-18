@@ -1442,3 +1442,25 @@ Capacity 2 ограничивает два незавершённых задан
 для будущего multiplexing только после явного добавления владельца задания и
 персонального decoder state; использовать слот 0/1 как A/B нельзя. Read-only
 декомпиляция сохранена в `build/ghidra-sync-queue-callback-audit-20261018.log`.
+
+### Неактивная AAC sync queue как кандидат для MP3-дорожки B — 18 октября 2026 года
+
+HIBE содержит две очереди с одинаковой generic queue vtable `0x676944` и общим
+RMI-контекстом `0x14937498`: активную `mp3dec_sync` по RAM `0x109ee078` и
+не запущенную в этом снимке `mp4_aacdec_sync` по RAM `0x109edfd4`. У второй
+`queue+0x14=1`, `queue+0x15=0`, capacity `2`, stack request `0x2c8` байта;
+у MP3-очереди worker запущен и stack request равен `0x700` байтам. AAC queue
+имеет свой callback object по RAM `0x109edfa4`; его vtable отличается от MP3,
+а callback context `+0x0c` равен нулю.
+
+Инициализаторы `+0x25db1c` и `+0x25e364` строят одинаковую общую очередь с
+разными callback objects. Метод queue `+0x00` в таблице `0x676944` запускает
+worker, `+0x04` его останавливает. Поэтому возможный прототип B может временно
+использовать уже созданную AAC queue, направив её на отдельный MP3 callback и
+item B; после handoff нужно остановить её и восстановить исходное AAC-состояние.
+Это потенциально убирает создание новой queue/task, но не является готовым
+вторым декодером. Размер/владение stack request, безопасность временной подмены
+AAC callback, сериализация двух worker-ов при общем IRAM, отдельные stream и
+decoder state, PCM B и восстановление обычного AAC-пути ещё не проверены.
+Декомпиляции: `build/ghidra-aac-sync-construction-audit-20261018.log` и
+`build/ghidra-aac-sync-callback-methods-20261018.log`.
