@@ -1881,3 +1881,25 @@ track-open для B опасно: он сбрасывает registry A. Ветк
 декомпиляция находится в ignored `build/ghidra-rmi-resource-open-followup.log`,
 а машинные инструкции аргументов и FSbuf request — в
 `build/ghidra-rmi-fsbuf-listing-followup.log`.
+
+### FSbuf использует отдельную область backing buffer — 18 октября 2026 года
+
+Caller `FUN_1025e148` передаёт `FUN_1024b5bc` адрес `0x14983100` и размер
+`0x40000`. Вложенный `FUN_10216b4c` сохраняет эту пару в полях своего объекта
+`+0x4070/+0x407c`, а `0x8000` — в `+0x4080`; сохранённое число блоков равно
+8. В HIBE native-диапазон
+`0x10983100..0x109c3100` содержит этот 256-КБ backing buffer; он уже принадлежит
+штатному FSbuf и не является свободным запасом для B. Это показывает, что
+независимый FSbuf может требовать отдельную область памяти помимо 37-КБ
+наблюдаемого parent extent. Требование приватной копии для второго экземпляра
+ещё нужно подтвердить на реальных чтениях.
+
+Расчёт `tools/crossfade_memory_budget.py` теперь отдельно показывает сценарий
+с 256-КБ FSbuf backing buffer: 355 708 байт нижнего subtotal для поточной схемы.
+Даже эта сумма не учитывает неизвестные cache/descriptor размеры и не является
+измерением свободного heap во время playback. Конструктор, его входные поля и
+сохранённую область можно перепроверить в
+`build/ghidra-parent-fsbuf-constructor.log`,
+`build/ghidra-rmiprimary-caller-listing.log`,
+`build/ghidra-rmiprimary-clone-cost.log` и read-only
+`tools/inspect_hibe_audio.py`.

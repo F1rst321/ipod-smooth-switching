@@ -232,6 +232,38 @@ def inspect_decoder_service_registry(snapshot: Snapshot) -> None:
               f"vtable=0x{vtable:08x}, state-flag={flag}")
 
 
+def inspect_fsbuf_backing_buffer(snapshot: Snapshot) -> None:
+    """Report the stock player's external FSbuf backing buffer from HIBE."""
+    player = 0x10939F60
+    pointer_offset = 0x9064
+    size_offset = 0x9070
+    chunk_size_offset = 0x9074
+    chunk_count_offset = 0x9078
+
+    buffer_alias = snapshot.u32(player + pointer_offset)
+    buffer = snapshot.native_ram_address(buffer_alias)
+    size = snapshot.u32(player + size_offset)
+    chunk_size = snapshot.u32(player + chunk_size_offset)
+    chunk_count = snapshot.u32(player + chunk_count_offset)
+    print(f"Stock FSbuf backing buffer: alias=0x{buffer_alias:08x} "
+          f"(native RAM 0x{buffer:08x}), size=0x{size:x}, "
+          f"chunk=0x{chunk_size:x}, chunks={chunk_count}")
+
+    if size == 0 or size > 0x100000 or chunk_size == 0 or chunk_count == 0:
+        print("  captured FSbuf backing-buffer geometry is not plausible")
+        return
+    if chunk_size * chunk_count != size:
+        print("  chunk geometry does not cover the captured buffer exactly")
+    if not RAM_BASE <= buffer <= RAM_BASE + RAM_SIZE - size:
+        print("  backing-buffer range is outside captured RAM")
+        return
+
+    contents = snapshot.read(buffer, size)
+    print(f"  occupied snapshot range 0x{buffer:08x}..0x{buffer + size:08x}; "
+          f"nonzero={sum(value != 0 for value in contents)}/{size}; "
+          f"SHA-256={hashlib.sha256(contents).hexdigest()}")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("image", type=Path, help="read-only firmware partition backup")
@@ -301,6 +333,7 @@ def main() -> int:
 
     inspect_audio_provider_registry(snapshot)
     inspect_decoder_service_registry(snapshot)
+    inspect_fsbuf_backing_buffer(snapshot)
 
     # TPCMQUEUE's provider is separate from the file wrapper.  Its descriptor
     # array points into a preallocated buffer region.  Report descriptor and
