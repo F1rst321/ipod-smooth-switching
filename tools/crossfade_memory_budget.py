@@ -1,14 +1,19 @@
 #!/usr/bin/env python3
-"""Estimate PCM look-ahead storage for an iPod crossfade implementation.
+"""Estimate PCM look-ahead and known private B-side state for crossfade.
 
 This is a capacity calculator only. It does not inspect or modify firmware,
 allocate target memory, or claim that the RetailOS audio path can use a ring
-buffer of the reported size.
+buffer of the reported size. The combined estimate includes only the documented
+MP3 item and private filter history; file, cache, and allocator overhead are
+not included.
 """
 from __future__ import annotations
 
 import argparse
 import math
+
+MP3_ITEM_BYTES = 0x3BEC
+FILTER_HISTORY_BYTES = 0x1110
 
 
 def main() -> int:
@@ -30,18 +35,24 @@ def main() -> int:
 
     bytes_per_frame = args.channels * (args.bits_per_sample // 8)
     block_bytes = args.block_frames * bytes_per_frame
+    b_private_state_bytes = MP3_ITEM_BYTES + FILTER_HISTORY_BYTES
     print(f"PCM format: {args.sample_rate} Hz, {args.channels} channels, "
           f"{args.bits_per_sample}-bit; {block_bytes:,} bytes/block")
-    print("seconds  raw_bytes  whole_blocks  block_aligned_bytes")
+    print(f"Known private B state: MP3 item {MP3_ITEM_BYTES:,} + filter history "
+          f"{FILTER_HISTORY_BYTES:,} = {b_private_state_bytes:,} bytes")
+    print("seconds  raw_pcm  whole_blocks  aligned_pcm  pcm_plus_B_state")
     for seconds in range(3, 11):
         frames = seconds * args.sample_rate
         raw_bytes = frames * bytes_per_frame
         blocks = math.ceil(frames / args.block_frames)
         aligned_bytes = blocks * block_bytes
-        print(f"{seconds:>7}  {raw_bytes:>9,}  {blocks:>12,}  "
-              f"{aligned_bytes:>19,}")
-    print("Capacity only: runtime heap availability and audio-path integration "
-          "remain unverified.")
+        combined_bytes = aligned_bytes + b_private_state_bytes
+        print(f"{seconds:>7}  {raw_bytes:>8,}  {blocks:>12,}  "
+              f"{aligned_bytes:>11,}  {combined_bytes:>16,}")
+    print("Minimum working-set estimate only: excludes file/stream cache, "
+          "PCM handoff buffers, allocator overhead, and runtime heap pressure.")
+    print("Audio-path integration and availability during playback remain "
+          "unverified.")
     return 0
 
 
