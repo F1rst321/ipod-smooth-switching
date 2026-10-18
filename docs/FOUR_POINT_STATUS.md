@@ -21,6 +21,14 @@ FSbuf backing `0x8000` выделились, конструктор вернул
 FSbuf: очередь, URI open, чтение B и playback по-прежнему не исполнены.
 Воспроизвести: `py tools/verify_b_fsbuf_constructor.py`.
 
+Дополнительно `tools/verify_b_stream_heap_budget.py` попросил штатный allocator
+выделить все десять candidate-областей одновременно: суммарно 126 332 байта с
+32-КиБ FSbuf backing и 355 708 байт с полным 256-КиБ backing. Оба запроса
+прошли на копии idle HIBE heap, и штатный FSbuf constructor принял соответствующий
+backing. Это подтверждает только capacity снимка простоя; свободный heap во
+время playback и полный состав B-объектов не подтверждены. Команды приведены в
+[`RUNTIME_BUFFER_PLAN.md`](RUNTIME_BUFFER_PLAN.md).
+
 **Обновление 18 октября:** подтверждён startup-loader `OSOS+0x8392c`, который
 копирует MP3 sync worker из `OSOS+0x7326c8..0x733ca0` в
 `IRAM 0x4001c8fc..0x4001ded4`. Побайтовое сравнение совпало с сохранённым

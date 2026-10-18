@@ -138,6 +138,14 @@ To inspect the RetailOS heap free list saved in the HIBE snapshot:
 py .\tools\inspect_hibe_heap.py .\firmware\ipod_video_5.5g_30gb_stock_partition1.img
 ```
 
+To exercise the stock allocator with candidate memory requests for a second
+streaming context (snapshot-only; no file open or device access):
+
+```powershell
+py .\tools\verify_b_stream_heap_budget.py
+py .\tools\verify_b_stream_heap_budget.py --fsbuf-backing-bytes 0x40000
+```
+
 This validates the saved allocator links and reports its free blocks. It is a read-only audit of one saved state; it does not promise the same free memory during playback.
 
 To compare the raw bytes of the backup and IPSW payload without extracting either file, run:
