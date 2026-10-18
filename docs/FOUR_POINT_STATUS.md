@@ -971,3 +971,20 @@ partition SHA-256
 Остались реальная B resource/item factory, проверка общей scratch и block-size
 state, fade trigger/handoff, boot/UI/audio проверка на самом iPod. Текущий образ
 не готов к установке.
+
+### Повторная проверка кандидата и резервных копий — 18 октября 2026 года
+
+Повторно прошли `verify_crossfade_mixer.py`, `verify_crossfade_settings.py`,
+`verify_stock_mp3_pcm.py` и structural verify полного partition-кандидата.
+Хэши кандидата совпали с указанными выше: OSOS —
+`2a58fb0b3a885e14c2b103a3ca0212b7c44485d4062019020b22bc25cdd62368`, partition —
+`6b690c25dd4b5e8b9006d5b1c6153d985d8c7cf528b75eca569c83da7b7eb09f`.
+Эмуляционный прогон всё ещё вручную задаёт mock file-stream объект в
+`item+0x3b9c`; проверки не запускают реальный RetailOS audio service и не
+подтверждают звук на устройстве.
+
+SHA-256 резервной копии в `firmware/` и отдельной копии на `D:\` совпал:
+`010bda520671d86a5a2cb010b57ee4484c980e54d97eb3e12621e08cde0423a3`.
+Обе копии проверены только чтением и остались нетронутыми. Ни одна прошивка на
+iPod не загружалась; candidate остаётся неустановочным исследовательским
+образом.
