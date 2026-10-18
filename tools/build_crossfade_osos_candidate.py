@@ -311,6 +311,22 @@ def build_candidate(
             "target": f"0x{audio_gate:08x}",
             "stock_target": f"0x{AUDIO_HOOK_STOCK_TARGET:08x}",
         }
+    payload_window_used_end = max(
+        resource_used_end,
+        HANDLER_FILE_OFFSET + len(payload),
+        (AUDIO_HOOK_START - OSOS_LOAD_ADDRESS + len(audio_payload))
+        if audio_payload is not None
+        else 0,
+    )
+    if payload_window_used_end > RESOURCE_WINDOW_END:
+        raise ValueError("combined resources and payload exceed the OSOS zero window")
+    manifest["payload_window"] = {
+        "start_address": f"0x{OSOS_LOAD_ADDRESS + RESOURCE_WINDOW_START:08x}",
+        "end_address_exclusive": f"0x{OSOS_LOAD_ADDRESS + RESOURCE_WINDOW_END:08x}",
+        "used_end_address_exclusive": f"0x{OSOS_LOAD_ADDRESS + payload_window_used_end:08x}",
+        "used_high_water_bytes": payload_window_used_end - RESOURCE_WINDOW_START,
+        "remaining_bytes": RESOURCE_WINDOW_END - payload_window_used_end,
+    }
     return bytes(candidate), manifest
 
 

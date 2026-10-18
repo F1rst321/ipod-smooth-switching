@@ -99,6 +99,9 @@ payload window at `0x10714988`. This fits the 1,152 stereo PCM16 frames emitted
 by the emulated MP3 worker and avoids calling the allocator from the audio
 callback. The candidate builder checks that the initialized hook state points
 to this symbol and that the full block stays inside the 16,804-byte OSOS window.
+The combined resources and payload use the window through `0x10715b88`, leaving
+1,564 bytes below its exclusive end at `0x107161a4`; the generated manifest
+reports this high-water mark and remaining space.
 
 The rebuilt offline research image has OSOS SHA-256
 `28316a0d998f5ae9ff6c3bab7bf198c904ad4c29fbfc4f5f25b33ebd44ac8acc` and
