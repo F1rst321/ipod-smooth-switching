@@ -5,8 +5,9 @@ This is a capacity calculator only. It does not inspect or modify firmware,
 allocate target memory, or claim that the RetailOS audio path can use a ring
 buffer of the reported size. The private-workspace figure is the full provider-0
 BSS range, treated as an isolation candidate rather than a proven per-decoder
-allocation. File/cache state, callback scheduling, and allocator overhead are
-not included.
+allocation. The cloned MP3 sync object and its configured stack are included as
+candidate costs. File/cache state, callback scheduling, and allocator overhead
+are not included.
 """
 from __future__ import annotations
 
@@ -18,6 +19,8 @@ FILTER_HISTORY_BYTES = 0x1110
 PROVIDER0_WORKSPACE_BYTES = 0x3C10
 VOICE_DESCRIPTOR_MIN_BYTES = 0x4C
 TRACK_RESOURCE_BYTES = 700
+MP3_SYNC_OBJECT_MIN_BYTES = 0xA4
+MP3_SYNC_WORKER_STACK_BYTES = 0x700
 PLAYER_CONTEXT_PREFIX_BYTES = 0x29E0
 IDLE_HIBE_LARGEST_FREE_BLOCK_BYTES = 4_641_944
 
@@ -48,10 +51,12 @@ def main() -> int:
     block_bytes = args.block_frames * bytes_per_frame
     known_decoder_state_bytes = MP3_ITEM_BYTES + FILTER_HISTORY_BYTES
     b_private_state_bytes = known_decoder_state_bytes + PROVIDER0_WORKSPACE_BYTES
+    b_sync_control_bytes = MP3_SYNC_OBJECT_MIN_BYTES + MP3_SYNC_WORKER_STACK_BYTES
     queued_pcm_bytes = args.queued_blocks * block_bytes
     descriptor_bytes = args.queued_blocks * VOICE_DESCRIPTOR_MIN_BYTES
     streaming_subtotal = (b_private_state_bytes + TRACK_RESOURCE_BYTES
-                          + queued_pcm_bytes + descriptor_bytes)
+                          + queued_pcm_bytes + descriptor_bytes
+                          + b_sync_control_bytes)
     queued_seconds = args.queued_blocks * args.block_frames / args.sample_rate
     print(f"PCM format: {args.sample_rate} Hz, {args.channels} channels, "
           f"{args.bits_per_sample}-bit; {block_bytes:,} bytes/block")
@@ -60,6 +65,10 @@ def main() -> int:
     print(f"Optional isolated provider-0 workspace: {PROVIDER0_WORKSPACE_BYTES:,} "
           "bytes (BSS range 0x40002514..0x40006124; ownership not proven)")
     print(f"B track resource allocation observed in factory: {TRACK_RESOURCE_BYTES:,} bytes")
+    print(f"Candidate MP3 sync callback/queue object: at least "
+          f"{MP3_SYNC_OBJECT_MIN_BYTES} bytes; configured worker stack "
+          f"0x{MP3_SYNC_WORKER_STACK_BYTES:x} = "
+          f"{MP3_SYNC_WORKER_STACK_BYTES:,} bytes")
     print(f"Streaming queue candidate: {args.queued_blocks} B blocks = "
           f"{queued_pcm_bytes:,} PCM bytes ({queued_seconds:.3f} s of queued audio)")
     print(f"Minimum descriptor extent: {VOICE_DESCRIPTOR_MIN_BYTES} bytes each "
@@ -78,22 +87,26 @@ def main() -> int:
         raw_bytes = frames * bytes_per_frame
         blocks = math.ceil(frames / args.block_frames)
         aligned_bytes = blocks * block_bytes
-        combined_bytes = aligned_bytes + b_private_state_bytes
-        two_queue_bytes = 2 * aligned_bytes + b_private_state_bytes
+        combined_bytes = aligned_bytes + b_private_state_bytes + b_sync_control_bytes
+        two_queue_bytes = (2 * aligned_bytes + b_private_state_bytes
+                           + b_sync_control_bytes)
         print(f"{seconds:>7}  {raw_bytes:>8,}  {blocks:>12,}  "
               f"{aligned_bytes:>11,}  {combined_bytes:>16,}  "
               f"{two_queue_bytes:>29,}")
     max_fade_frames = 10 * args.sample_rate
     max_fade_blocks = math.ceil(max_fade_frames / args.block_frames)
     max_fade_pcm = max_fade_blocks * block_bytes
-    max_fade_candidate = 2 * max_fade_pcm + b_private_state_bytes
+    max_fade_candidate = (2 * max_fade_pcm + b_private_state_bytes
+                          + b_sync_control_bytes)
     print(f"10-second two-queue subtotal vs saved idle HIBE largest block: "
           f"{max_fade_candidate:,}/{args.idle_largest_free:,} bytes; "
           f"snapshot-only headroom {args.idle_largest_free - max_fade_candidate:,} bytes")
     print("Candidate working-set estimate only: both look-ahead columns add the "
           "provider-0 workspace as an isolation candidate, not a proven private "
-          "allocation. They exclude file/stream cache, queue descriptors, extra "
-          "DMA handoff storage, allocator overhead, and runtime heap pressure. "
+          "allocation. They include one minimum callback/queue object and the "
+          "MP3 queue's configured 0x700-byte worker stack as candidate costs. "
+          "They exclude file/stream cache, PCM descriptors, extra DMA handoff "
+          "storage, allocator overhead, and runtime heap pressure. "
           "The two-queue column counts two aligned PCM buffers plus that candidate B state. "
           "The HIBE comparison is not a playback-time capacity guarantee.")
     print("Audio-path integration and availability during playback remain "
