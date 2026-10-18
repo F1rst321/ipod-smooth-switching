@@ -67,17 +67,23 @@ def main() -> int:
     print("Queue duration is buffering depth, not the selected crossfade duration. "
           "The voice descriptor's observed fields reach +0x48; its full allocation "
           "size is not known.")
-    print("seconds  raw_pcm  whole_blocks  aligned_pcm  pcm_plus_B_context")
+    print("seconds  raw_pcm  whole_blocks  aligned_pcm  pcm_plus_B_context  "
+          "two_pcm_queues_plus_B_context")
     for seconds in range(3, 11):
         frames = seconds * args.sample_rate
         raw_bytes = frames * bytes_per_frame
         blocks = math.ceil(frames / args.block_frames)
         aligned_bytes = blocks * block_bytes
         combined_bytes = aligned_bytes + b_private_state_bytes
+        two_queue_bytes = 2 * aligned_bytes + b_private_state_bytes
         print(f"{seconds:>7}  {raw_bytes:>8,}  {blocks:>12,}  "
-              f"{aligned_bytes:>11,}  {combined_bytes:>16,}")
-    print("Candidate working-set estimate only: excludes file/stream cache, "
-          "extra DMA handoff storage, allocator overhead, and runtime heap pressure.")
+              f"{aligned_bytes:>11,}  {combined_bytes:>16,}  "
+              f"{two_queue_bytes:>29,}")
+    print("Candidate working-set estimate only: both look-ahead columns add the "
+          "provider-0 workspace as an isolation candidate, not a proven private "
+          "allocation. They exclude file/stream cache, queue descriptors, extra "
+          "DMA handoff storage, allocator overhead, and runtime heap pressure. "
+          "The two-queue column counts two aligned PCM buffers plus that candidate B state.")
     print("Audio-path integration and availability during playback remain "
           "unverified.")
     return 0
