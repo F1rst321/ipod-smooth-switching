@@ -73,6 +73,8 @@ RAM_BYTES = 0x02000000
 ITEM_ADDRESS = 0x20001000
 ITEM_B_ADDRESS = 0x20005000
 ITEM_BYTES = 0x3BEC
+MP3_ITEM_STREAM_OFFSET = 0x3B9C
+PROVIDER_STREAM_OFFSET = 0x2E60
 STACK_ADDRESS = 0x200F0000
 STOP_ADDRESS = 0x200FF000
 CALLBACK_RETURN = 0x200FF100
@@ -222,13 +224,16 @@ def main() -> int:
     service_branch_site_words: list[int] = []
     service_gate_item_values: list[int] = []
     last_call_instruction_count = [0]
-    stream_positions = {0x20030000: 0, 0x2003A000: 0}
-    stream_object = 0x20030000
-    stream_b_object = 0x2003A000
+    provider_parent = 0x20033000
+    provider_parent_b = 0x20038000
+    # FUN_101a8ff8 binds item+0x3b9c to provider_parent+0x2e60. The stock
+    # factory is not called here because it reloads shared provider-0 code/BSS.
+    stream_object = provider_parent + PROVIDER_STREAM_OFFSET
+    stream_b_object = provider_parent_b + PROVIDER_STREAM_OFFSET
+    stream_positions = {stream_object: 0, stream_b_object: 0}
     stream_vtable = 0x20031000
     stream_method_base = 0x200E0000
     metadata = 0x20032000
-    parent = 0x20033000
     service_object = 0x20034000
     service_vtable = 0x20035000
     service_stub_base = 0x200E1000
@@ -254,11 +259,20 @@ def main() -> int:
     machine.mem_write(service_vtable + 0x3C, struct.pack("<I", service_stub_base + 0x20))
     metadata_words = [128000, SAMPLE_RATE, 0, 2, 0, 0, 0, 0, 0, 0, 0, 0]
     machine.mem_write(metadata, struct.pack("<12I", *metadata_words))
-    machine.mem_write(parent + 0x297C, b"\0")
-    machine.mem_write(item + 4, struct.pack("<I", parent))
-    machine.mem_write(item + 0x3B9C, struct.pack("<I", stream_object))
-    machine.mem_write(ITEM_B_ADDRESS + 4, struct.pack("<I", parent))
-    machine.mem_write(ITEM_B_ADDRESS + 0x3B9C, struct.pack("<I", stream_b_object))
+    machine.mem_write(provider_parent + 0x297C, b"\0")
+    machine.mem_write(provider_parent_b + 0x297C, b"\0")
+    # Model the two pointer stores observed in FUN_101a8ff8. Both parent and
+    # stream methods are test objects; their file reads are handled by hooks.
+    machine.mem_write(item + 4, struct.pack("<I", provider_parent))
+    machine.mem_write(
+        item + MP3_ITEM_STREAM_OFFSET,
+        struct.pack("<I", provider_parent + PROVIDER_STREAM_OFFSET),
+    )
+    machine.mem_write(ITEM_B_ADDRESS + 4, struct.pack("<I", provider_parent_b))
+    machine.mem_write(
+        ITEM_B_ADDRESS + MP3_ITEM_STREAM_OFFSET,
+        struct.pack("<I", provider_parent_b + PROVIDER_STREAM_OFFSET),
+    )
 
     def code_hook(uc, address, _size, _user_data):
         last_call_instruction_count[0] += 1
@@ -444,8 +458,8 @@ def main() -> int:
     machine.ctl_remove_cache(service_bypass_address, service_bypass_address + 4)
 
     call(0x4000BC9C, (item + 0x44, 0, 0))
-    # The stock initializer succeeds with a null fourth argument. The worker's
-    # actual file interface is stored separately at item+0x3b9c below.
+    # The stock provider factory binds item+0x3b9c to its parent's +0x2e60
+    # stream subobject. The subobject's file methods remain mocked below.
     call(0x10127DF4, (item, metadata, 0, 0))
     if sorted(service_method_calls) != [0, 0x20]:
         raise RuntimeError(
@@ -778,8 +792,8 @@ def main() -> int:
         "calls and skipped both for B"
     )
     print(
-        "  PASS: A and B item initialization succeeded with param_4=null; "
-        "the actual item+0x3b9c stream objects were supplied manually"
+        "  PASS: mocked A/B parent pointers use stock parent+0x2e60 -> "
+        "item+0x3b9c binding; file-stream methods remain mocked"
     )
     print("  PASS: A and B each resumed after one interleaved worker call")
     print(
