@@ -500,7 +500,7 @@ def main() -> int:
     worker_b_instructions: list[int] = []
     worker_b_nonzero_samples: list[int] = []
     worker_b_returns = []
-    for _ in range(4):
+    for _ in range(3):
         worker_b_returns.append(
             call(0x4000AE10, (ITEM_B_ADDRESS, output_b, PCM_BYTES))
         )
@@ -508,7 +508,7 @@ def main() -> int:
         block = bytes(machine.mem_read(output_b, PCM_BYTES))
         block_samples = struct.unpack("<" + "h" * (len(block) // 2), block)
         worker_b_nonzero_samples.append(sum(sample != 0 for sample in block_samples))
-    if worker_b_returns != [1] * 4:
+    if worker_b_returns != [1, 1, 1]:
         raise RuntimeError(f"Unexpected B worker results: {worker_b_returns}")
     if machine.mem_read(ITEM_B_ADDRESS + 0x3BC8, 1)[0]:
         raise RuntimeError("Stock MP3 worker set item B's failure flag")
@@ -521,6 +521,7 @@ def main() -> int:
         machine.mem_read(callback_context_b, CALLBACK_CONTEXT_BYTES)
     )
     item_a_after_b = bytes(machine.mem_read(item, ITEM_BYTES))
+    item_b_after = bytes(machine.mem_read(ITEM_B_ADDRESS, ITEM_BYTES))
     if history_a_after != history_a_before_b:
         raise RuntimeError("Decoding B changed A's separate synthesis history")
     if item_a_after_b != item_a_before_b:
@@ -558,6 +559,41 @@ def main() -> int:
         raise RuntimeError("A did not resume with PCM after decoding B")
     if abs(resume_hz - args.expected_hz) > 60:
         raise RuntimeError(f"A resumed at unexpected frequency {resume_hz:.2f} Hz")
+    worker_a_resume_instructions = last_call_instruction_count[0]
+    if bytes(machine.mem_read(callback_context_b, CALLBACK_CONTEXT_BYTES)) != history_b_after:
+        raise RuntimeError("Decoding A changed B's synthesis history")
+    if bytes(machine.mem_read(ITEM_B_ADDRESS, ITEM_BYTES)) != item_b_after:
+        raise RuntimeError("Decoding A changed B's item state")
+    queue_submitted = struct.unpack("<I", machine.mem_read(0x149EE078 + 0x78, 4))[0]
+    queue_completed = struct.unpack("<I", machine.mem_read(0x149EE078 + 0x7C, 4))[0]
+    if queue_submitted != queue_completed:
+        raise RuntimeError("Cannot resume B with pending A jobs")
+
+    history_a_before_b_resume = bytes(
+        machine.mem_read(callback_context, CALLBACK_CONTEXT_BYTES)
+    )
+    history_b_before_resume = bytes(
+        machine.mem_read(callback_context_b, CALLBACK_CONTEXT_BYTES)
+    )
+    item_a_before_b_resume = bytes(machine.mem_read(item, ITEM_BYTES))
+    machine.mem_write(0x149EE078 + 0x44, struct.pack("<I", callback_b))
+    machine.mem_write(active_item_cell, struct.pack("<I", ITEM_B_ADDRESS + 0x44))
+    machine.mem_write(0x4000248C, struct.pack("<I", output_b))
+    machine.mem_write(0x40002510, struct.pack("<I", output_b))
+    worker_b_resume = call(0x4000AE10, (ITEM_B_ADDRESS, output_b, PCM_BYTES))
+    worker_b_resume_instructions = last_call_instruction_count[0]
+    pcm_b_resume = bytes(machine.mem_read(output_b, PCM_BYTES))
+    samples_b_resume = struct.unpack(
+        "<" + "h" * (len(pcm_b_resume) // 2), pcm_b_resume
+    )
+    if worker_b_resume != 1 or not any(samples_b_resume):
+        raise RuntimeError("B did not resume with PCM after decoding A")
+    if bytes(machine.mem_read(callback_context, CALLBACK_CONTEXT_BYTES)) != history_a_before_b_resume:
+        raise RuntimeError("Decoding B changed A's synthesis history after A resumed")
+    if bytes(machine.mem_read(item, ITEM_BYTES)) != item_a_before_b_resume:
+        raise RuntimeError("Decoding B changed A's item state after A resumed")
+    if bytes(machine.mem_read(callback_context_b, CALLBACK_CONTEXT_BYTES)) == history_b_before_resume:
+        raise RuntimeError("B synthesis history did not advance after decoding A")
     left_samples = samples[::2]
     zero_crossings = sum(
         (left_samples[index] < 0 <= left_samples[index + 1])
@@ -601,17 +637,20 @@ def main() -> int:
     print(f"  A input: {args.mp3} ({len(file_data):,} bytes; audio offset {audio_offset})")
     print(f"  A worker returns: {worker_returns}")
     print(f"  A emulated instruction count per call: {worker_a_instructions}")
+    print(f"  A resume instruction count: {worker_a_resume_instructions}")
     print(f"  A nonzero output samples after each call: {worker_a_nonzero_samples}")
     print(f"  A PCM16 stereo block: {sum(value != 0 for value in samples)}/{len(samples)} "
           f"nonzero samples; range {min(samples)}..{max(samples)}")
     print(f"  A tone estimate: {estimated_hz:.2f} Hz; A resume: {resume_hz:.2f} Hz")
     print(f"  B input: {args.mp3_b} ({len(file_data_b):,} bytes; audio offset {audio_offset_b})")
-    print(f"  B worker returns: {worker_b_returns}")
+    print(f"  B worker returns, then resumes after A: {worker_b_returns}, {worker_b_resume}")
     print(f"  B emulated instruction count per call: {worker_b_instructions}")
+    print(f"  B resume instruction count: {worker_b_resume_instructions}")
     print(f"  B nonzero output samples after each call: {worker_b_nonzero_samples}")
     print(f"  B PCM16 stereo block: {sum(value != 0 for value in samples_b)}/{len(samples_b)} "
           f"nonzero; range {min(samples_b)}..{max(samples_b)}")
     print("  PASS: B used its cloned synthesis history; A item and history stayed intact")
+    print("  PASS: A and B each resumed after one interleaved worker call")
     print(f"  PASS: ARM mixer combined decoded A/B PCM for {mixed_frames} frames "
           f"inside a three-second fade ({mixer_state[1]}/{mixer_state[0]} frames done)")
     print("  Scope: instruction counts are emulator counts, not measured CPU cycles. "
