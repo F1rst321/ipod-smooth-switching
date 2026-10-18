@@ -950,3 +950,48 @@ producer-ом (`+0x732a44`: `3→7`), тогда как consumer `+0x722b20` в 
 единственный найденный `TPCMQUEUE`. Это не доказывает, что другой provider
 невозможен: поиск ограничен одним HIBE-состоянием, нижними 32 МиБ и одной
 геометрией буфера.
+
+### Сервис аудиовыхода при открытии второго MP3-item-а
+
+18 октября 2026 года уточнён вызов общего service slot 5 из
+`OSOS+0x127df4`. После получения объекта и проверки результата инициализатор
+вызывает метод vtable `+0x3c` с аргументом `1`, затем метод `+0x30`. В
+сохранённом HIBE slot 5 указывает на объект `RAM 0x1086eaf8`, чья таблица
+методов находится в OSOS по `+0x671084`.
+
+Статическое значение vtable `+0x3c` равно IRAM `0x40000e44`. Снимок IRAM
+`build/audio-analysis/iram-after-600m.bin` сопоставляет первые 32 байта этой
+функции точному OSOS-адресу `+0x716fe0`. Код проверяет флаг аппаратного
+состояния, меняет биты регистра по адресу из IRAM `+0x40000ecc` и передаёт
+команду `0x13` общему диспетчеру. Vtable `+0x30` указывает на
+`OSOS+0x1efd0c`; эта функция тоже меняет биты в том же состоянии и выполняет
+косвенный вызов диспетчера. Таким образом, полный MP3 item initializer
+действительно вызывает управление общим аудиовыходом; это не нейтральная
+регистрация отдельного file handle.
+
+Эта трассировка объясняет риск стандартного открытия B: вызов `+0x127df4` для
+второго item-а может менять состояние вывода A. Она не доказывает, что первый
+поток обязательно остановится, и пока не показывает безопасный способ создать
+B без этих service-вызовов. Для кроссфейда всё ещё требуются раздельные file,
+MP3/synthesis contexts и PCM-буферы, их синхронное декодирование, смешивание
+до DMA и сохранение обычного audio service в состоянии A.
+
+Локальные read-only декомпиляции и сопоставление адреса:
+`build/ghidra-target-functions-20261018.log`,
+`build/ghidra-service-vtable-targets-20261018.log`,
+`build/ghidra-iram-service-method-20261018.log` и результат
+`tools/map_iram_aliases.py` для `0x40000e44`. Для повторного декодирования
+сохранённого IRAM добавлен `tools/ghidra/DumpIramFunctions.java`. Снимок не
+используется как заменитель live-трассы во время музыки. Для его импорта в
+отдельный локальный Ghidra project:
+
+```powershell
+$iramProject = Join-Path (Get-Location) 'build\ghidra-projects-iram'
+New-Item -ItemType Directory -Force $iramProject | Out-Null
+& $ghidra $iramProject IRAM_600M `
+  -import (Join-Path (Get-Location) 'build\audio-analysis\iram-after-600m.bin') `
+  -loader BinaryLoader -loader-baseAddr 0x40000000 `
+  -processor ARM:LE:32:v4t -noanalysis `
+  -scriptPath (Join-Path (Get-Location) 'tools\ghidra') `
+  -postScript DumpIramFunctions.java 0x40000e44
+```
