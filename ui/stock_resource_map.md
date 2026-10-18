@@ -27,6 +27,36 @@ section descriptors plus all resource records; it is the table length, not a
 free-space budget. Menu 24598 ends at `0x4af804`, and the next resource starts
 at precisely `0x4af804`. There is no in-place space for an extra row.
 
+### Offline 19-row menu layout prototype
+
+`tools/patch_settings_menu_prototype.py` builds the resource-only layout in
+ignored `build/`. It adds a Settings row after Volume Limit, points that row to
+the existing View/command 17538, and assigns property key `0x6089` and string
+resource ID 30000. It expands the Settings menu to 764 bytes and moves the
+adjacent Menu 24600 resource. To fit nine string records in each locale table,
+it relocates the first overlapping `LDTm` or `BMap` payload and recalculates
+resource offsets. It also adds localized value strings for 3–10 seconds.
+
+`tools/build_crossfade_osos_candidate.py` combines those resources with a
+296-byte getter/setter module built by `tools/build_settings_hooks.py`. It
+patches the existing empty getter and setter cases for key `0x6089` to branch
+to the handlers, which read/write candidate byte `preferences+0xb70` and mark
+the preferences object dirty. `tools/verify_crossfade_settings.py` executes
+the handlers in Unicorn for values, clamping, default behavior, value-string
+IDs, and failure handling. It models the stock continuation and localized
+string calls with stubs; it does not establish the real caller ABI or behavior
+on hardware.
+
+The resource prototype uses 7,975 of the 16,804 zero bytes at
+`OSOS+0x712000`; the settings handlers begin at `OSOS+0x714000`. All 25
+resource tables, the expanded menu, added strings, and relocated resources are
+checked by the builder. The existing Volume Limit view remains a layout
+hypothesis. The Click Wheel event path and the displayed value have not been
+verified, and the audio hook is absent. The resulting OSOS and partition are
+experimental offline artifacts, not an installable firmware release. See
+[`SETTINGS_CANDIDATE.md`](../docs/SETTINGS_CANDIDATE.md) for commands, hashes,
+and current limitations.
+
 Relevant current Settings rows:
 
 | Row | Label in stock Russian | Row offset | `cmd` | `textID2` |
