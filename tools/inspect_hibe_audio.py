@@ -233,12 +233,30 @@ def inspect_decoder_service_registry(snapshot: Snapshot) -> None:
 
 
 def inspect_fsbuf_backing_buffer(snapshot: Snapshot) -> None:
-    """Report the stock player's external FSbuf backing buffer from HIBE."""
+    """Report the stock player's FSbuf buffer and cursor state from HIBE."""
     player = 0x10939F60
+    fsbuf = player + 0x2E60
     pointer_offset = 0x9064
     size_offset = 0x9070
     chunk_size_offset = 0x9074
     chunk_count_offset = 0x9078
+
+    fsbuf_vtable = snapshot.u32(fsbuf)
+    inner_vtable = snapshot.u32(fsbuf + 0x0C)
+    source_alias = snapshot.u32(fsbuf + 0x21DC)
+    cursor_low = snapshot.u32(fsbuf + 0x21E8)
+    cursor_high = snapshot.u32(fsbuf + 0x21EC)
+    limit_low = snapshot.u32(fsbuf + 0x21F0)
+    limit_high = snapshot.u32(fsbuf + 0x21F4)
+    flags = tuple(snapshot.read(fsbuf + offset, 1)[0]
+                  for offset in (0x21F8, 0x21F9, 0x21FA))
+
+    print(f"Stock FSbuf stream object: RAM 0x{fsbuf:08x}; "
+          f"vtable=0x{fsbuf_vtable:08x}; inner vtable=0x{inner_vtable:08x}")
+    print(f"  source-object field +0x21dc=0x{source_alias:08x}; "
+          f"cursor=0x{cursor_high:08x}{cursor_low:08x}; "
+          f"limit=0x{limit_high:08x}{limit_low:08x}; "
+          f"flags +0x21f8..+0x21fa={flags}")
 
     buffer_alias = snapshot.u32(player + pointer_offset)
     buffer = snapshot.native_ram_address(buffer_alias)

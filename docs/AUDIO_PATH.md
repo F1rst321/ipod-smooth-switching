@@ -1906,6 +1906,60 @@ Caller `FUN_1025e148` передаёт `FUN_1024b5bc` адрес `0x14983100` и
 `build/ghidra-rmiprimary-clone-cost.log` и read-only
 `tools/inspect_hibe_audio.py`.
 
+### MP3 provider factory использует один статический item slot — 18 октября 2026 года
+
+Повторная проверка точного machine listing `FUN_101a8ff8` уточнила, почему
+вызов штатной MP3 factory второй раз не создаёт независимый item. Literal
+`OSOS+0x1a9078` содержит `0x40013aa8` — фиксированный IRAM-адрес provider
+object; `OSOS+0x1a907c` содержит его vtable `0x400139dc`, а
+`OSOS+0x1a9080` указывает на единственную глобальную item cell `0x40013a64`.
+Factory записывает новые callback/player-поля в этот provider object, вызывает
+constructor в его встроенной области `+0x44`, и сохраняет результат в эту же
+ячейку. Второй обычный factory-вызов тем самым переиспользует живую область A
+и заменяет опубликованный item pointer; он не является безопасным B-конструктором.
+
+Сам низкоуровневый MP3 constructor `0x4000bc9c` в Unicorn уже проверен на двух
+разных caller-owned областях по `0x3bec` байт: инициализация B не меняет A.
+Это оставляет техническую возможность сделать custom B wrapper, разместив
+его отдельно и сохранив отдельный item pointer. Но проверка не покрывает
+инициализацию callback/queue, родительский FSbuf, файловый cursor, время жизни
+объекта и штатный heap. Поэтому она не снимает ограничение stock factory и не
+подтверждает реальный второй источник данных.
+
+Машинные инструкции воспроизводятся
+`tools/ghidra/DumpRetailListing.java 0x1a8ff8 64`; свежая read-only проверка
+reference-ов literal-ов записана в ignored
+`build/ghidra-mp3-factory-listing-current.log` и
+`build/ghidra-mp3-global-xrefs-current.log`. OSOS и резервная копия не
+изменялись.
+
+### FSbuf хранит cursor внутри каждого экземпляра — 18 октября 2026 года
+
+Проверена таблица методов встроенного FSbuf по HIBE-снимку IRAM. Vtable
+`OSOS+0x6745c8` направляет read в `IRAM 0x4001d24c`, а seek/position — в
+`IRAM 0x4001d464`. Оба метода работают с полями переданного объекта: read
+использует диапазон позиции `+0x21e8..+0x21f4` и состояние cache, а seek меняет
+его cursor в `+0x21e8/+0x21ec`. Следовательно, два действительно отдельных
+FSbuf-объекта могут иметь раздельные позиции чтения и состояния cache. Это
+делает приватный parent/FSbuf для B более правдоподобным вариантом, чем
+переключение одного активного буфера A.
+
+Остаётся главный вопрос: какой штатный объект привязывает URI/track-resource к
+внутреннему stream каждого FSbuf, и можно ли безопасно создать второй такой
+owner, сохранив обе записи registry и callback-ы. Сейчас известен один
+`RMIprimary` caller, который настраивает общий remote service и один player;
+второй B parent/file handle и чтение двух разных музыкальных файлов ещё не
+исполнены. Это подтверждает только отдельность cursor/cache-полей класса FSbuf,
+не параллельное воспроизведение.
+
+Read-only декомпиляция `0x4001d24c/0x4001d464` находится в ignored
+`build/ghidra-fsbuf-iram-methods-20261018.log`; vtable и вызовы методов
+сверялись в `build/ghidra-fsbuf-vtable-methods-20261018.log`. Обновлённый
+`tools/inspect_hibe_audio.py` читает те же поля из HIBE: в сохранённом состоянии
+cursor равен `0x0ad404`, limit — `0x0e8000`, а source-object field равен нулю.
+Это один snapshot и он не фиксирует чтение следующей песни. Проверка повторяется
+командой из README; резервная копия и официальная прошивка не изменялись.
+
 ### Runtime heap и conditional reset hook в offline candidate — 18 октября 2026 года
 
 Свободную RAM не создаёт увеличение OSOS или файлового раздела. PCM ring уже
