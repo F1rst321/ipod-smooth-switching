@@ -47,6 +47,8 @@ To reproduce the HIBE/OSOS comparison and list runtime references to the audio e
 `py .\tools\analyze_hibe_runtime.py .\firmware\ipod_video_5.5g_30gb_stock_partition1.img`.
 To inspect the saved I²S interface registry and queued object vtables without accessing the iPod, run
 `py .\tools\inspect_hibe_audio.py .\firmware\ipod_video_5.5g_30gb_stock_partition1.img`.
+To report all-zero OSOS ranges and possible address-like words without changing the backup, run
+`py .\tools\inspect_osos_code_caves.py .\firmware\ipod_video_5.5g_30gb_stock_partition1.img`.
 
 The audio worker is copied into IRAM in noncontiguous sections. Direct ARM
 calls from its OSOS bytes can point to different functions at runtime; use
