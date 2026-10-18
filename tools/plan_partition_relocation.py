@@ -19,6 +19,7 @@ EXPECTED_SHA256 = "010bda520671d86a5a2cb010b57ee4484c980e54d97eb3e12621e08cde042
 EXPECTED_TYPES = ("OSOS", "RSRC", "AUPD", "HIBE")
 OSOS_LOAD_ADDRESS = 0x10000000
 KNOWN_ALLOCATOR_OBJECT = 0x1081DA00
+KNOWN_ALLOCATOR_POOL_START = 0x10A0FFA0
 
 
 def main() -> int:
@@ -77,6 +78,9 @@ def main() -> int:
     if old_ram_end <= KNOWN_ALLOCATOR_OBJECT < new_ram_end:
         print(f"WARNING: the proposed OSOS RAM range would overlap the known allocator object "
               f"at 0x{KNOWN_ALLOCATOR_OBJECT:08x}.")
+    if old_ram_end <= KNOWN_ALLOCATOR_POOL_START < new_ram_end:
+        print(f"WARNING: the proposed OSOS RAM range would overlap the known allocator pool "
+              f"starting at 0x{KNOWN_ALLOCATOR_POOL_START:08x}.")
     print("Layout only: no component bytes or directory fields were changed.")
     print("HIBE, RAM allocation, image checksums, and boot behavior are not validated here.")
     print("No firmware image was created; this plan is not installable.")

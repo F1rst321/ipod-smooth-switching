@@ -22,6 +22,8 @@ RAM_SIZE = 0x02000000
 PAGE_SIZE = 0x10000
 STOCK_OSOS_SHA256 = "784ae3d5540fd2f89e8c947b93629e97f62a06dc311d9745aab143e4db6bb251"
 ALLOCATOR_GLOBAL_OFFSETS = (0x11CA48, 0x11AB98)
+ALLOCATOR_POOL_BASE = 0x10A0FFA0
+ALLOCATOR_POOL_SIZE = 0x014F0060
 
 
 def extract_component(partition: bytes, entries: list[dict[str, int | str | bool | None]],
@@ -93,6 +95,11 @@ def main() -> int:
     runs = sorted(find_zero_runs(extension, args.minimum_zero_run),
                   key=lambda bounds: bounds[1] - bounds[0], reverse=True)
 
+    pool_offset = ALLOCATOR_POOL_BASE - RAM_BASE
+    pool = ram[pool_offset:pool_offset + ALLOCATOR_POOL_SIZE]
+    if len(pool) != ALLOCATOR_POOL_SIZE:
+        parser.error("known allocator pool is outside the captured HIBE RAM window")
+
     print(f"OSOS size: {len(osos):,} bytes; SHA-256: {osos_hash}")
     print(f"HIBE size: {len(hibe):,} bytes = 0x800 header + 0x{RAM_SIZE:x} RAM bytes")
     print(f"HIBE RAM starts at 0x{RAM_BASE:08x}; OSOS end: 0x{RAM_BASE + extension_offset:08x}")
@@ -100,6 +107,11 @@ def main() -> int:
         if global_offset + 4 <= len(osos):
             pointer = int.from_bytes(osos[global_offset:global_offset + 4], "little")
             print(f"Allocator-related global OSOS+0x{global_offset:x} points to 0x{pointer:08x}")
+    pool_nonzero = sum(value != 0 for value in pool)
+    print(f"Allocator pool 0x{ALLOCATOR_POOL_BASE:08x}.."
+          f"0x{ALLOCATOR_POOL_BASE + ALLOCATOR_POOL_SIZE:08x}: "
+          f"{pool_nonzero:,}/{len(pool):,} nonzero bytes "
+          f"({pool_nonzero / len(pool):.1%}) in this HIBE snapshot")
     print(f"Inspected extension-adjacent RAM: {len(extension):,} bytes")
     page_count = (len(extension) + PAGE_SIZE - 1) // PAGE_SIZE
     for index in range(page_count):
