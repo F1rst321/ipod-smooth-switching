@@ -37,6 +37,12 @@ resource handle и async disk refill заменены готовым cache-сн�
 выбранного трека через resource-manager open до реального файла всё ещё не
 подтверждён.
 
+Дополнительный Unicorn-прогон `tools/verify_b_resource_manager_handles.py`
+вызвал stock `FUN_1012873c` на provider registry из HIBE и получил два разных
+unopened resource object для разных MP3 URI. B не изменил handle A и таблицу
+provider-ов. Это подтверждает только manager factory dispatch; метод открытия
+ресурса, существование URI на плеере и чтение файлов не исполнялись.
+
 **Обновление 18 октября:** подтверждён startup-loader `OSOS+0x8392c`, который
 копирует MP3 sync worker из `OSOS+0x7326c8..0x733ca0` в
 `IRAM 0x4001c8fc..0x4001ded4`. Побайтовое сравнение совпало с сохранённым

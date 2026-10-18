@@ -153,6 +153,13 @@ MP3 vectors, without opening files or accessing a device:
 py .\tools\verify_b_fsbuf_cached_reads.py
 ```
 
+To emulate two separate unopened resources through the stock manager and the
+provider registry saved in HIBE (the test does not open the paths):
+
+```powershell
+py .\tools\verify_b_resource_manager_handles.py
+```
+
 This validates the saved allocator links and reports its free blocks. It is a read-only audit of one saved state; it does not promise the same free memory during playback.
 
 To compare the raw bytes of the backup and IPSW payload without extracting either file, run:
