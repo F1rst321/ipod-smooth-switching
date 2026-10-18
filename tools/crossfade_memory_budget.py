@@ -19,6 +19,7 @@ PROVIDER0_WORKSPACE_BYTES = 0x3C10
 VOICE_DESCRIPTOR_MIN_BYTES = 0x4C
 TRACK_RESOURCE_BYTES = 700
 PLAYER_CONTEXT_PREFIX_BYTES = 0x29E0
+IDLE_HIBE_LARGEST_FREE_BLOCK_BYTES = 4_641_944
 
 
 def main() -> int:
@@ -33,9 +34,12 @@ def main() -> int:
                         help="frames per firmware PCM block (default: 1152)")
     parser.add_argument("--queued-blocks", type=int, default=4,
                         help="candidate B PCM queue depth (default: 4 blocks)")
+    parser.add_argument("--idle-largest-free", type=int,
+                        default=IDLE_HIBE_LARGEST_FREE_BLOCK_BYTES,
+                        help="largest block in the saved idle HIBE snapshot; comparison only")
     args = parser.parse_args()
     if min(args.sample_rate, args.channels, args.bits_per_sample,
-           args.block_frames, args.queued_blocks) <= 0:
+           args.block_frames, args.queued_blocks, args.idle_largest_free) <= 0:
         parser.error("all format and block dimensions must be positive")
     if args.bits_per_sample % 8:
         parser.error("bits per sample must be a whole number of bytes")
@@ -79,11 +83,19 @@ def main() -> int:
         print(f"{seconds:>7}  {raw_bytes:>8,}  {blocks:>12,}  "
               f"{aligned_bytes:>11,}  {combined_bytes:>16,}  "
               f"{two_queue_bytes:>29,}")
+    max_fade_frames = 10 * args.sample_rate
+    max_fade_blocks = math.ceil(max_fade_frames / args.block_frames)
+    max_fade_pcm = max_fade_blocks * block_bytes
+    max_fade_candidate = 2 * max_fade_pcm + b_private_state_bytes
+    print(f"10-second two-queue subtotal vs saved idle HIBE largest block: "
+          f"{max_fade_candidate:,}/{args.idle_largest_free:,} bytes; "
+          f"snapshot-only headroom {args.idle_largest_free - max_fade_candidate:,} bytes")
     print("Candidate working-set estimate only: both look-ahead columns add the "
           "provider-0 workspace as an isolation candidate, not a proven private "
           "allocation. They exclude file/stream cache, queue descriptors, extra "
           "DMA handoff storage, allocator overhead, and runtime heap pressure. "
-          "The two-queue column counts two aligned PCM buffers plus that candidate B state.")
+          "The two-queue column counts two aligned PCM buffers plus that candidate B state. "
+          "The HIBE comparison is not a playback-time capacity guarantee.")
     print("Audio-path integration and availability during playback remain "
           "unverified.")
     return 0
