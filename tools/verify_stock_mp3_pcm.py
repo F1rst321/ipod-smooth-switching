@@ -584,6 +584,12 @@ def main() -> int:
     )
     item_a_before_b_resume = bytes(machine.mem_read(item, ITEM_BYTES))
     hook_state = mixer_symbols["ipod_crossfade_playback_hook_state"]
+    b_scratch = mixer_symbols["ipod_crossfade_output_b_scratch"]
+    initial_hook_state = struct.unpack("<10I", machine.mem_read(hook_state, 40))
+    if initial_hook_state[8] != b_scratch or initial_hook_state[9] != PCM_BYTES:
+        raise RuntimeError(
+            "Playback hook's default state does not point to its one-block B scratch"
+        )
     hook_fade = hook_state + 40
     disabled_output_before = bytes(machine.mem_read(OUTPUT_ADDRESS, PCM_BYTES))
     disabled_hook_result = call_thumb(
@@ -600,7 +606,7 @@ def main() -> int:
             "<10I6IB3x",
             0x43524650, 1, ITEM_B_ADDRESS, callback_b,
             active_item_cell, 0x149EE078 + 0x44,
-            0x4000248C, 0x40002510, output_b, 0x4000,
+            0x4000248C, 0x40002510, b_scratch, PCM_BYTES,
             0, 0, 0, 0, 0, 0, 0,
         ),
     )
@@ -608,7 +614,7 @@ def main() -> int:
         mixer_symbols["ipod_crossfade_begin"], (hook_fade, 3 * SAMPLE_RATE)
     ) != 1:
         raise RuntimeError("Playback hook fade initialization failed")
-    machine.mem_write(output_b, bytes(0x4000))
+    machine.mem_write(b_scratch, bytes(PCM_BYTES))
     raw_a_before_hook = bytes(machine.mem_read(OUTPUT_ADDRESS, PCM_BYTES))
     worker_b_resume = call_thumb(
         mixer_symbols["ipod_crossfade_playback_mix_hook"],
@@ -633,7 +639,7 @@ def main() -> int:
     if mixed_a_after_hook == raw_a_before_hook:
         raise RuntimeError("Playback hook did not mix decoded B into A's block")
     worker_b_resume_instructions = last_call_instruction_count[0]
-    pcm_b_resume = bytes(machine.mem_read(output_b, PCM_BYTES))
+    pcm_b_resume = bytes(machine.mem_read(b_scratch, PCM_BYTES))
     samples_b_resume = struct.unpack(
         "<" + "h" * (len(pcm_b_resume) // 2), pcm_b_resume
     )

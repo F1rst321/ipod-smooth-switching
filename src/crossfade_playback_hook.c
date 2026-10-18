@@ -5,9 +5,18 @@
 #define RETAILOS_VOICE_MIXER 0x10217CB8U
 #define ITEM_ACTIVE_CONTEXT_OFFSET 0x44U
 #define STEREO_FRAME_BYTES 4U
+#define STOCK_MP3_BLOCK_BYTES 4608U
 
 typedef int32_t (*retailos_mp3_worker_fn)(void *, void *, uint32_t);
 typedef void (*retailos_voice_mixer_fn)(void *, int16_t *, uint32_t);
+
+/*
+ * The stock MP3 worker was verified with one 1,152-frame stereo PCM block.
+ * Keep one matching B output block in the payload's reserved OSOS window so
+ * the audio callback does not call the heap allocator or perform file I/O.
+ */
+uint32_t ipod_crossfade_output_b_scratch[STOCK_MP3_BLOCK_BYTES / sizeof(uint32_t)]
+    __attribute__((section(".data.ipod_crossfade_output_b_scratch"), aligned(4))) = {0U};
 
 volatile ipod_crossfade_playback_hook_state_t ipod_crossfade_playback_hook_state
     __attribute__((section(".data.ipod_crossfade_playback_hook_state"))) = {
@@ -19,8 +28,8 @@ volatile ipod_crossfade_playback_hook_state_t ipod_crossfade_playback_hook_state
         0U,
         0U,
         0U,
-        0U,
-        0U,
+        (uint32_t)(uintptr_t)ipod_crossfade_output_b_scratch,
+        STOCK_MP3_BLOCK_BYTES,
         {0U, 0U, 0U, 0U, 0U, 0U, 0U},
     };
 

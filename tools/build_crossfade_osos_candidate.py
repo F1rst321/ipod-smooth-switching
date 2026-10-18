@@ -38,6 +38,7 @@ AUDIO_HOOK_START = 0x10714200
 AUDIO_HOOK_SITE_OFFSET = 0x1D606C
 AUDIO_HOOK_STOCK_BRANCH = 0xEB010711
 AUDIO_HOOK_STOCK_TARGET = 0x10217CB8
+AUDIO_B_PCM_BYTES = 4608
 
 
 def arm_branch(instruction_address: int, target_address: int) -> int:
@@ -126,11 +127,21 @@ def require_audio_payload(
     if not isinstance(state_address, int):
         raise ValueError("audio payload has no playback-hook state symbol")
     state_offset = state_address - AUDIO_HOOK_START
-    if state_offset < 0 or state_offset + 8 > len(payload):
+    if state_offset < 0 or state_offset + 40 > len(payload):
         raise ValueError("playback-hook state is outside the audio payload")
-    state_magic, state_enabled = struct.unpack_from("<II", payload, state_offset)
+    state_fields = struct.unpack_from("<10I", payload, state_offset)
+    state_magic, state_enabled = state_fields[:2]
+    state_output, state_capacity = state_fields[8:10]
     if state_magic != 0x43524650 or state_enabled != 0:
         raise ValueError("playback hook must have its expected magic and default disabled state")
+    scratch_address = symbols.get("ipod_crossfade_output_b_scratch")
+    if not isinstance(scratch_address, int) or scratch_address & 3:
+        raise ValueError("audio payload has no aligned B PCM scratch buffer")
+    scratch_offset = scratch_address - AUDIO_HOOK_START
+    if state_output != scratch_address or state_capacity != AUDIO_B_PCM_BYTES:
+        raise ValueError("playback-hook state does not point at its 1,152-frame PCM buffer")
+    if scratch_offset < 0 or scratch_offset + state_capacity > len(payload):
+        raise ValueError("B PCM scratch buffer is outside the audio payload")
     return payload, manifest
 
 
@@ -238,6 +249,15 @@ def build_candidate(
         "runtime_validated": False,
         "audio_path_connected": False,
         "playback_hook_installed": audio_payload is not None,
+        "b_pcm_scratch_buffer": (
+            {
+                "address": f"0x{int(audio_manifest['symbols']['ipod_crossfade_output_b_scratch']):08x}",
+                "bytes": AUDIO_B_PCM_BYTES,
+                "frames_stereo_pcm16": 1152,
+            }
+            if audio_manifest is not None
+            else None
+        ),
         "stock_osos_sha256": EXPECTED_OSOS_SHA256,
         "candidate_osos_sha256": sha256(bytes(candidate)),
         "osos_size": len(candidate),

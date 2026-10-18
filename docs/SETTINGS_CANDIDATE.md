@@ -22,7 +22,9 @@ The resource builder relocates the affected tables and menu into the audited
 resource bytes there. The 296-byte settings handler starts at `+0x714000`.
 Static ownership of the zero window at runtime has not been proven, so fitting
 the payload in the file does not prove that it is safe to execute on the iPod.
-The code cave is not extra RAM; audio buffers still need runtime heap memory.
+The code cave is not extra physical RAM. The current playback helper places one
+4,608-byte B output block there; decoder state, track resources, and any larger
+PCM ring still need separately reserved runtime heap memory.
 
 ## Rebuild and check
 
@@ -89,6 +91,24 @@ The branch target, embedded payload bytes, resource table, image directory, and
 OSOS checksum were checked offline. The next-track item/resource lifecycle,
 Settings-to-fade control, boot, UI, persistence, and audio on the physical iPod
 are still unverified; do not install this candidate.
+
+## One-block B scratch prototype
+
+The playback helper now reserves a 4,608-byte static scratch block in the
+payload window at `0x10714988`. This fits the 1,152 stereo PCM16 frames emitted
+by the emulated MP3 worker and avoids calling the allocator from the audio
+callback. The candidate builder checks that the initialized hook state points
+to this symbol and that the full block stays inside the 16,804-byte OSOS window.
+
+The rebuilt offline research image has OSOS SHA-256
+`28316a0d998f5ae9ff6c3bab7bf198c904ad4c29fbfc4f5f25b33ebd44ac8acc` and
+partition SHA-256
+`cdbe85661207f6d8a264cade95858f866b0094b82c310c1ffd43735add9c2247`.
+The Settings handler emulation, A/B MP3 worker scenario, PCM helper checks, and
+partition structural verification passed. The hook remains default-disabled;
+it still has no B item/resource setup or fade trigger, and the OSOS window's
+runtime ownership and physical audio behavior remain unverified. This remains
+a research image, not an installable firmware release.
 
 ## Work still required before a device-ready release
 
