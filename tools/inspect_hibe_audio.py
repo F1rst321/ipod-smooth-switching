@@ -82,7 +82,9 @@ def inspect_decoder_sync_objects(snapshot: Snapshot) -> None:
     Queue capacity and two output slots describe frame scheduling. A queue
     for another codec does not establish a second instance for the same track
     format or prove that PCM was played. Resolve uncached aliases at each
-    pointer dereference, since callback vtables are in RAM.
+    pointer dereference, since callback vtables are in RAM. The MP3 callback
+    object embeds its queue at +0x20; the reported 0xa4-byte minimum follows
+    from the captured queue fields through +0x80 and four-byte alignment.
     """
     for queue in snapshot.find_vtable(0x00676944):
         name = snapshot.read(queue + 0x1C, 24).split(b"\0", 1)[0]
@@ -91,8 +93,18 @@ def inspect_decoder_sync_objects(snapshot: Snapshot) -> None:
         callback_pointer = snapshot.u32(queue + 0x44)
         task_context_pointer = snapshot.u32(queue + 0x3C)
         task_context = snapshot.native_ram_address(task_context_pointer)
+        instance = queue - 0x20
+        callback = snapshot.native_ram_address(callback_pointer)
         print(f"Saved decoder sync {name.decode('ascii', errors='replace')!r} "
               f"at RAM 0x{queue:08x}")
+        if callback_pointer and callback == instance:
+            print(f"  composite_instance=0x{instance:08x}; queue_offset=0x20; "
+                  "minimum_aligned_size=0xa4 bytes")
+        elif callback_pointer:
+            print(f"  inferred_instance=0x{instance:08x}; queue_offset=0x20; "
+                  f"callback resolves to 0x{callback:08x}")
+        else:
+            print("  callback is absent; embedded instance base is not confirmed")
         print(f"  worker_stack_bytes=0x{snapshot.u32(queue + 0x10):x}, "
               f"start_enabled={snapshot.read(queue + 0x14, 1)[0]}, "
               f"worker_started={snapshot.read(queue + 0x15, 1)[0]}")
@@ -104,7 +116,6 @@ def inspect_decoder_sync_objects(snapshot: Snapshot) -> None:
         if callback_pointer == 0:
             print("  no callback is attached in this snapshot")
             continue
-        callback = snapshot.native_ram_address(callback_pointer)
         table = snapshot.native_ram_address(snapshot.u32(callback))
         print(f"  callback RAM 0x{callback:08x}; vtable RAM 0x{table:08x}")
         for slot in (0x04, 0x0C, 0x1C, 0x20):
