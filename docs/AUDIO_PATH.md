@@ -1145,7 +1145,7 @@ context, затем запустить его через `0x4001d13c`. Но fact
 Литералы и вызовы подтверждены read-only декомпиляцией
 `build/ghidra-provider-loaders-all-20261017.log`.
 
-### Маршрут запуска sync-worker через общий dispatcher — 19 октября
+### Маршрут запуска sync-worker через общий dispatcher — 18 октября 2026 года
 
 Точный worker `OSOS+0x732f08` (копия в IRAM `0x4001d13c`) подготавливает
 request record и передаёт его generic dispatcher-у `OSOS+0x235250` вместе с
@@ -1160,7 +1160,7 @@ request service. Совпадающий контекст и наличие gener
 не доказывают безопасную одновременную работу двух музыкальных потоков. Дамп
 функций и xref-ов воспроизводится read-only скриптом
 `tools/ghidra/DumpRetailFunctions.java`; локальный вывод находится в
-`build/ghidra-rmi-worker-route-20261019.log`.
+`build/ghidra-rmi-worker-route-20261018.log`.
 
 ### Возможная схема с одним декодером и PCM look-ahead
 
