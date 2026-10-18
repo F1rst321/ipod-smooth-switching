@@ -49,8 +49,9 @@ py .\tools\build_crossfade_mixer.py
 
 ```powershell
 py -m pip install --target .\build\pydeps -r .\requirements-emulation.txt
-$env:PYTHONPATH = (Join-Path (Get-Location) 'build\pydeps')
 py .\tools\verify_crossfade_mixer.py
+py .\tools\verify_mp3_context_constructor.py
+py .\tools\verify_stock_mp3_pcm.py
 ```
 
 Эмулятор проверяет арифметику микшера, операции кольцевой очереди и контракт

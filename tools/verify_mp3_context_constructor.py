@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import sys
 from pathlib import Path
 
 from map_codec_overlay import (
@@ -38,6 +39,10 @@ class ConstructorEmulator:
     """Run the ARM7TDMI provider constructor over the stock overlay bytes."""
 
     def __init__(self, osos: bytes) -> None:
+        # Dependencies installed with pip --target live in ignored build/.
+        emulation_deps = str(PROJECT_ROOT / "build" / "pydeps")
+        if emulation_deps not in sys.path:
+            sys.path.insert(0, emulation_deps)
         try:
             from unicorn import (
                 UC_ARCH_ARM,

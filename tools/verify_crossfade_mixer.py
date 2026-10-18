@@ -12,6 +12,7 @@ import argparse
 import re
 import struct
 import subprocess
+import sys
 from pathlib import Path
 
 
@@ -86,6 +87,10 @@ class MixerEmulator:
     """Small ARM emulator wrapper for the two exported mixer functions."""
 
     def __init__(self, code: bytes, symbols: dict[str, int]):
+        # Dependencies installed with pip --target live in ignored build/.
+        emulation_deps = str(PROJECT_ROOT / "build" / "pydeps")
+        if emulation_deps not in sys.path:
+            sys.path.insert(0, emulation_deps)
         try:
             from unicorn import UC_ARCH_ARM, UC_HOOK_CODE, UC_MODE_LITTLE_ENDIAN, UC_MODE_THUMB, Uc
             from unicorn.arm_const import (
