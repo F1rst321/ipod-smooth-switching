@@ -17,6 +17,8 @@ SECTOR_SIZE = 2048
 EXPECTED_SIZE = 98_574_336
 EXPECTED_SHA256 = "010bda520671d86a5a2cb010b57ee4484c980e54d97eb3e12621e08cde0423a3"
 EXPECTED_TYPES = ("OSOS", "RSRC", "AUPD", "HIBE")
+OSOS_LOAD_ADDRESS = 0x10000000
+KNOWN_ALLOCATOR_OBJECT = 0x1081DA00
 
 
 def main() -> int:
@@ -70,6 +72,11 @@ def main() -> int:
     old_tail = len(raw) - last_end
     new_tail = len(raw) - final_end
     print(f"Trailing partition space: {old_tail:,} -> {new_tail:,} bytes")
+    old_ram_end = OSOS_LOAD_ADDRESS + int(osos["length"])
+    new_ram_end = old_ram_end + args.grow_osos
+    if old_ram_end <= KNOWN_ALLOCATOR_OBJECT < new_ram_end:
+        print(f"WARNING: the proposed OSOS RAM range would overlap the known allocator object "
+              f"at 0x{KNOWN_ALLOCATOR_OBJECT:08x}.")
     print("Layout only: no component bytes or directory fields were changed.")
     print("HIBE, RAM allocation, image checksums, and boot behavior are not validated here.")
     print("No firmware image was created; this plan is not installable.")
