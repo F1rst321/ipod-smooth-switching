@@ -937,6 +937,16 @@ slot 5, сохранив выход A; и где добавить consumer, ко
 Воспроизводимые read-only результаты: `build/ghidra-audio-worker-flag-offset.log`
 и `build/ghidra-tpcmqueue-vtable-methods-20261018.log`.
 
+Частота этих событий тоже не сводится к одной функции: `+0x23f400` строит
+сообщение с vtable `OSOS+0x678034` и отправляет его в очередь `+0x1554`.
+Среди найденных вызовов есть обработчики состояния/интерфейса (`+0x23e99c`,
+`+0x23eb30`, `+0x23f8dc` и другие), поэтому сам факт пробуждения worker-а
+пока не равен подтверждённому «I²S запросил следующий PCM-блок». Типы событий,
+которые непосредственно выставляют `queue+0xc8`, ещё нужно связать с их
+источником. Read-only декомпиляции: `build/ghidra-audio-worker-event-trigger.log`,
+`build/ghidra-audio-worker-event-senders.log` и
+`build/ghidra-audio-worker-message-type.log`.
+
 ## Независимые пределы эмуляции
 
 Открытый QEMU-проект для iPod Video 5G документирует запуск штатного RetailOS
