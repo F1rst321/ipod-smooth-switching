@@ -91,6 +91,10 @@ def main() -> int:
           f"0x{FSBUF_BACKING_BUFFER_BYTES:x}-byte buffer for this stream; the "
           f"candidate subtotal becomes {isolated_fsbuf_subtotal:,} bytes. "
           "The second buffer requirement is not yet validated in playback.")
+    print(f"Private-stream candidate vs saved idle HIBE largest block: "
+          f"{isolated_fsbuf_subtotal:,}/{args.idle_largest_free:,} bytes; "
+          f"snapshot-only headroom "
+          f"{args.idle_largest_free - isolated_fsbuf_subtotal:,} bytes.")
     print(f"The track-open path separately reaches player+0x29dc; its observed "
           f"prefix is {TRACK_OPEN_PLAYER_PREFIX_BYTES:,} bytes, but the decoder "
           "worker needs the larger parent prefix above if that state is cloned.")
