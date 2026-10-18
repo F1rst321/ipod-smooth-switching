@@ -1313,3 +1313,34 @@ New-Item -ItemType Directory -Force $iramProject | Out-Null
   -scriptPath (Join-Path (Get-Location) 'tools\ghidra') `
   -postScript DumpIramFunctions.java 0x40000e44
 ```
+
+### Ранняя загрузка MP3 sync worker-а в IRAM — 19 октября
+
+В OSOS startup `+0x2c0` вызывает `+0x8392c`. Эта функция копирует два
+фиксированных участка OSOS в IRAM. Первый участок содержит sync-очередь и
+worker: `OSOS+0x7326c8..0x733ca0` переносится в
+`IRAM 0x4001c8fc..0x4001ded4` (0x15d8 байт). Поэтому функция очереди
+`OSOS+0x732d5c` появляется по адресу IRAM `0x4001cf90`, а проверенные функции
+остановки и запуска worker-а `OSOS+0x732fa0` и `OSOS+0x732f08` — по
+`0x4001d1d4` и `0x4001d13c`. Второй участок
+`OSOS+0x72292c..0x723594` копируется в `IRAM 0x40018800..0x40019468`
+(`0xc68` байт).
+
+Оба копирования побайтно совпадают с сохранённым 128-КиБ снимком
+`build/audio-analysis/iram-after-600m.bin`. Проверка выполняется без записи:
+
+```powershell
+py .\tools\map_boot_iram_copy.py `
+  .\firmware\extracted\audio-analysis\osos.bin `
+  --iram .\build\audio-analysis\iram-after-600m.bin
+```
+
+Это уточняет статическое место, из которого стартовая прошивка загружает
+worker-код, и означает, что изменение этих байтов OSOS отразится на копии в
+IRAM при следующем старте. Проверка не создаёт дополнительную оперативную
+память, не подтверждает параллельный декодер и не доказывает безопасность
+патча во время воспроизведения. Установочного образа по-прежнему нет.
+Read-only декомпиляции сохранены локально в
+`build/ghidra-shared-iram-loader-functions-20261019.log`,
+`build/ghidra-shared-iram-loader-caller-20261019.log` и
+`build/ghidra-shared-iram-loader-xrefs-20261019.log`.
