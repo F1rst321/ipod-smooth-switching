@@ -25,6 +25,7 @@ ALLOCATOR_REGIONS_OFFSET = 0x0C
 ALLOCATOR_REGION_COUNT_OFFSET = 0x5C
 ALLOCATOR_FREE_BYTES_OFFSET = 0x00
 ALLOCATOR_SENTINEL_OFFSET = 0x7C
+DECODER_ITEM_BYTES = 0x3BEC
 
 
 @dataclass(frozen=True)
@@ -176,6 +177,10 @@ def inspect(backup_path: Path) -> None:
         )
 
     region_bytes = sum(end - start for start, end in regions)
+    largest_block = max(block.size for block in blocks)
+    # Match the allocator's size rounding before comparing the item footprint.
+    rounded_item_bytes = ((DECODER_ITEM_BYTES + 3) & 0x3FFFFFFC) + 4
+    rounded_item_bytes = max(rounded_item_bytes, 0x10)
     print(f"Verified pinned backup: {len(backup):,} bytes; exact stock SHA-256")
     print(f"HIBE saved state resolves allocator pointer cell 0x{pointer_cell:08x} "
           f"to heap 0x{allocator:08x}")
@@ -183,7 +188,9 @@ def inspect(backup_path: Path) -> None:
         print(f"  Heap region {index}: 0x{start:08x}..0x{end:08x} ({end - start:,} bytes)")
     print(f"  Free-list blocks: {len(blocks)}")
     print(f"  Free bytes: {free_bytes:,}/{region_bytes:,} ({100 * free_bytes / region_bytes:.1f}%)")
-    print(f"  Largest contiguous free block: {max(block.size for block in blocks):,} bytes")
+    print(f"  Largest contiguous free block: {largest_block:,} bytes")
+    print(f"  One 0x{DECODER_ITEM_BYTES:x}-byte decoder item rounds to "
+          f"{rounded_item_bytes:,} bytes and fits: {largest_block >= rounded_item_bytes}")
     print("Snapshot only: free space can differ during playback; this does not prove a "
           "second decoder or crossfade is safe.")
     print("Read-only inspection: no firmware image or physical disk was modified.")
