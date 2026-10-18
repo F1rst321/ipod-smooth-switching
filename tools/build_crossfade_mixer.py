@@ -16,6 +16,8 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SOURCE = PROJECT_ROOT / "src" / "crossfade_mixer.c"
 RING_SOURCE = PROJECT_ROOT / "src" / "crossfade_pcm_ring.c"
+RESOURCE_GATE_SOURCE = PROJECT_ROOT / "src" / "crossfade_resource_gate.c"
+RESOURCE_GATE_ASSEMBLY = PROJECT_ROOT / "src" / "crossfade_resource_gate.S"
 LINKER_SCRIPT = PROJECT_ROOT / "src" / "crossfade_mixer.lds"
 DEFAULT_TOOLCHAIN = (
     PROJECT_ROOT / "build" / "toolchains" / "arm-gnu-14.3" / "unpacked" / "bin"
@@ -78,6 +80,8 @@ def main() -> int:
     output_dir.mkdir(parents=True, exist_ok=True)
     obj = output_dir / "crossfade_mixer.o"
     ring_obj = output_dir / "crossfade_pcm_ring.o"
+    resource_gate_obj = output_dir / "crossfade_resource_gate.o"
+    resource_gate_asm_obj = output_dir / "crossfade_resource_gate_asm.o"
     elf = output_dir / "crossfade_mixer.elf"
     binary = output_dir / "crossfade_mixer.bin"
     map_file = output_dir / "crossfade_mixer.map"
@@ -120,6 +124,33 @@ def main() -> int:
                 str(gcc),
                 *flags,
                 "-I",
+                str(RESOURCE_GATE_SOURCE.parent),
+                "-c",
+                str(RESOURCE_GATE_SOURCE),
+                "-o",
+                str(resource_gate_obj),
+            ],
+            output_dir,
+            log,
+        )
+        run(
+            [
+                str(gcc),
+                "-mcpu=arm7tdmi",
+                "-mthumb-interwork",
+                "-c",
+                str(RESOURCE_GATE_ASSEMBLY),
+                "-o",
+                str(resource_gate_asm_obj),
+            ],
+            output_dir,
+            log,
+        )
+        run(
+            [
+                str(gcc),
+                *flags,
+                "-I",
                 str(RING_SOURCE.parent),
                 "-c",
                 str(RING_SOURCE),
@@ -141,6 +172,8 @@ def main() -> int:
                 f"-Wl,-Map,{map_file}",
                 str(obj),
                 str(ring_obj),
+                str(resource_gate_obj),
+                str(resource_gate_asm_obj),
                 "-lgcc",
                 "-o",
                 str(elf),
@@ -169,7 +202,7 @@ def main() -> int:
     print(f"Compiler: {version}")
     print(f"Target: ARM7TDMI / ARMv4T Thumb")
     print(f"Payload: {binary} ({payload_size:,}/{OSOS_WINDOW_BYTES:,} bytes)")
-    print("Isolated mixer and PCM ring only; no audio hook or installable firmware image was built.")
+    print("Offline mixer, PCM ring, and resource-open gate; no decoder hook or installable image was built.")
     return 0
 
 

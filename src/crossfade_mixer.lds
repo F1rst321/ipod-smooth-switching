@@ -6,6 +6,8 @@ SECTIONS
 {
     . = 0x10712000;
     .text : ALIGN(4) {
+        KEEP(*(.text.ipod_crossfade_resource_registry_reset_gate))
+        KEEP(*(.text.ipod_crossfade_open_track_resource_b))
         KEEP(*(.text.ipod_crossfade_begin))
         KEEP(*(.text.ipod_crossfade_mix_block))
         KEEP(*(.text.ipod_crossfade_pcm_ring_storage_bytes))
@@ -20,7 +22,7 @@ SECTIONS
         *(.ARM.extab* .gnu.linkonce.armextab.*)
         *(.ARM.exidx* .gnu.linkonce.armexidx.*)
     }
-    .data : ALIGN(4) { *(.data .data.*) }
+    .data : ALIGN(4) { *(.data.ipod_crossfade_resource_gate_state) *(.data .data.*) }
     .bss (NOLOAD) : ALIGN(4) {
         *(.bss .bss.*)
         *(COMMON)

@@ -20,6 +20,20 @@ HOOKS = {
         0x1D6064,
         bytes.fromhex("24 21 a0 e1 05 10 a0 e1 11 07 01 eb 38 80 bd e8"),
     ),
+    "track resource factory": (
+        0x10B894,
+        bytes.fromhex("ff 4f 2d e9 00 70 a0 e1 00 00 a0 e3 8f df 4d e2"),
+    ),
+    # The first BL reinitializes the shared resource registry; the second adds
+    # the per-track key/path after the stream descriptor is prepared.
+    "per-track resource registry reset": (
+        0x0EC33C,
+        bytes.fromhex("00 60 a0 e3 d8 1b 01 eb 81 2f a0 e3"),
+    ),
+    "per-track resource registry append": (
+        0x0EC428,
+        bytes.fromhex("10 00 97 e5 00 30 a0 e3 8d 1b 01 eb"),
+    ),
 }
 
 
