@@ -89,9 +89,16 @@ def inspect_decoder_sync_objects(snapshot: Snapshot) -> None:
         if not name.startswith((b"mp3dec_sync", b"mp4_aacdec_sync")):
             continue
         callback_pointer = snapshot.u32(queue + 0x44)
+        task_context_pointer = snapshot.u32(queue + 0x3C)
+        task_context = snapshot.native_ram_address(task_context_pointer)
         print(f"Saved decoder sync {name.decode('ascii', errors='replace')!r} "
               f"at RAM 0x{queue:08x}")
-        print(f"  slots={snapshot.u32(queue + 0x40)}, "
+        print(f"  worker_stack_bytes=0x{snapshot.u32(queue + 0x10):x}, "
+              f"start_enabled={snapshot.read(queue + 0x14, 1)[0]}, "
+              f"worker_started={snapshot.read(queue + 0x15, 1)[0]}")
+        print(f"  task_context=0x{task_context_pointer:08x} "
+              f"(native RAM 0x{task_context:08x}), "
+              f"slots={snapshot.u32(queue + 0x40)}, "
               f"submitted={snapshot.u32(queue + 0x78)}, "
               f"completed={snapshot.u32(queue + 0x7C)}")
         if callback_pointer == 0:
