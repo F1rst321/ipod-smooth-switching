@@ -9,6 +9,8 @@ SECTIONS
         KEEP(*(.text.ipod_crossfade_begin))
         KEEP(*(.text.ipod_crossfade_mix_block))
         KEEP(*(.text.ipod_crossfade_pcm_ring_storage_bytes))
+        KEEP(*(.text.ipod_crossfade_pcm_ring_create))
+        KEEP(*(.text.ipod_crossfade_pcm_ring_destroy))
         KEEP(*(.text.ipod_crossfade_pcm_ring_init))
         KEEP(*(.text.ipod_crossfade_pcm_ring_available))
         KEEP(*(.text.ipod_crossfade_pcm_ring_write))

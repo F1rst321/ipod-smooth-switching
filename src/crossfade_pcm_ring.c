@@ -7,6 +7,9 @@
 #define RING_MAGIC 0x43524644U
 #define BYTES_PER_SAMPLE 2U
 
+typedef void *(*retailos_heap_alloc_fn)(uint32_t bytes);
+typedef void (*retailos_heap_free_fn)(void *memory);
+
 static void compiler_barrier(void) {
     __asm__ volatile ("" ::: "memory");
 }
@@ -62,6 +65,58 @@ uint32_t ipod_crossfade_pcm_ring_storage_bytes(
     capacity_frames = usable_frames + 1U;
     return (uint32_t)sizeof(ipod_crossfade_pcm_ring_t) +
         capacity_frames * frame_bytes;
+}
+
+ipod_crossfade_pcm_ring_t *ipod_crossfade_pcm_ring_create(
+    uint32_t channels,
+    uint32_t block_frames,
+    uint32_t queue_blocks
+) {
+    uint32_t storage_bytes;
+    void *storage;
+    ipod_crossfade_pcm_ring_t *ring;
+    retailos_heap_alloc_fn allocate;
+    retailos_heap_free_fn release;
+
+    storage_bytes = ipod_crossfade_pcm_ring_storage_bytes(
+        channels,
+        block_frames,
+        queue_blocks
+    );
+    if (storage_bytes == 0U) {
+        return 0;
+    }
+
+    allocate = (retailos_heap_alloc_fn)(uintptr_t)IPOD_CROSSFADE_RETAILOS_HEAP_ALLOC;
+    release = (retailos_heap_free_fn)(uintptr_t)IPOD_CROSSFADE_RETAILOS_HEAP_FREE;
+    storage = allocate(storage_bytes);
+    if (storage == 0) {
+        return 0;
+    }
+
+    ring = ipod_crossfade_pcm_ring_init(
+        storage,
+        storage_bytes,
+        channels,
+        block_frames,
+        queue_blocks
+    );
+    if (ring == 0) {
+        release(storage);
+    }
+    return ring;
+}
+
+void ipod_crossfade_pcm_ring_destroy(ipod_crossfade_pcm_ring_t *ring) {
+    retailos_heap_free_fn release;
+
+    if (!ring_is_valid(ring)) {
+        return;
+    }
+
+    ring->magic = 0U;
+    release = (retailos_heap_free_fn)(uintptr_t)IPOD_CROSSFADE_RETAILOS_HEAP_FREE;
+    release(ring);
 }
 
 ipod_crossfade_pcm_ring_t *ipod_crossfade_pcm_ring_init(

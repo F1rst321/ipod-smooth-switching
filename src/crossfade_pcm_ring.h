@@ -4,6 +4,10 @@
 
 #include <stdint.h>
 
+/* RetailOS 1.3 OSOS entry points at load base 0x10000000. */
+#define IPOD_CROSSFADE_RETAILOS_HEAP_ALLOC 0x1025A974U
+#define IPOD_CROSSFADE_RETAILOS_HEAP_FREE 0x1025A8F4U
+
 /*
  * Single-producer/single-consumer ring for already decoded interleaved PCM16.
  * The producer is the decoder worker; the consumer is the audio path. Both
@@ -24,6 +28,19 @@ uint32_t ipod_crossfade_pcm_ring_storage_bytes(
     uint32_t block_frames,
     uint32_t queue_blocks
 );
+
+/*
+ * Allocate from the stock RetailOS heap. Call from a task, before playback
+ * callback use; returns null if the request cannot be satisfied.
+ */
+ipod_crossfade_pcm_ring_t *ipod_crossfade_pcm_ring_create(
+    uint32_t channels,
+    uint32_t block_frames,
+    uint32_t queue_blocks
+);
+
+/* Call only after both ring users have stopped. */
+void ipod_crossfade_pcm_ring_destroy(ipod_crossfade_pcm_ring_t *ring);
 
 /* Initialize in place inside one block returned by the RetailOS heap. */
 ipod_crossfade_pcm_ring_t *ipod_crossfade_pcm_ring_init(

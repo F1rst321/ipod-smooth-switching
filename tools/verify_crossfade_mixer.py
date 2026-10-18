@@ -31,6 +31,8 @@ OUT_ADDRESS = RAM_BASE + 0x6000
 RING_STORAGE_ADDRESS = RAM_BASE + 0x8000
 RING_INPUT_ADDRESS = RAM_BASE + 0x9000
 RING_OUTPUT_ADDRESS = RAM_BASE + 0xA000
+RETAILOS_ALLOC_ADDRESS = 0x1025A974
+RETAILOS_FREE_ADDRESS = 0x1025A8F4
 STACK_ADDRESS = RAM_BASE + 0x1F000
 RETURN_ADDRESS = RAM_BASE + 0x1FFF0
 Q15_ONE = 32768
@@ -53,6 +55,8 @@ def load_symbols(nm: Path, elf: Path) -> dict[str, int]:
         "ipod_crossfade_begin",
         "ipod_crossfade_mix_block",
         "ipod_crossfade_pcm_ring_storage_bytes",
+        "ipod_crossfade_pcm_ring_create",
+        "ipod_crossfade_pcm_ring_destroy",
         "ipod_crossfade_pcm_ring_init",
         "ipod_crossfade_pcm_ring_available",
         "ipod_crossfade_pcm_ring_write",
@@ -93,15 +97,26 @@ class MixerEmulator:
         self.pc_register = UC_ARM_REG_PC
         self.lr_register = UC_ARM_REG_LR
         self.symbols = symbols
+        self.heap_allocate_result = 0
+        self.heap_requests: list[int] = []
+        self.heap_releases: list[int] = []
         self.uc.mem_map(CODE_BASE, CODE_MAP_SIZE)
         self.uc.mem_write(CODE_BASE, code)
         self.uc.mem_map(RAM_BASE, RAM_MAP_SIZE)
+        self.uc.mem_map(RETAILOS_ALLOC_ADDRESS & 0xFFFFF000, 0x1000)
 
-        def stop_on_return(uc, address, _size, _user_data):
+        def handle_code(uc, address, _size, _user_data):
             if address == RETURN_ADDRESS:
                 uc.emu_stop()
+            elif address == RETAILOS_ALLOC_ADDRESS:
+                self.heap_requests.append(uc.reg_read(self.regs[0]))
+                uc.reg_write(self.regs[0], self.heap_allocate_result)
+                uc.reg_write(self.pc_register, uc.reg_read(self.lr_register))
+            elif address == RETAILOS_FREE_ADDRESS:
+                self.heap_releases.append(uc.reg_read(self.regs[0]))
+                uc.reg_write(self.pc_register, uc.reg_read(self.lr_register))
 
-        self.uc.hook_add(UC_HOOK_CODE, stop_on_return)
+        self.uc.hook_add(UC_HOOK_CODE, handle_code)
 
     def call(self, name: str, args: tuple[int, ...], stack_args: tuple[int, ...] = ()) -> int:
         if len(args) > len(self.regs):
@@ -229,6 +244,37 @@ def verify(build_dir: Path, toolchain_bin: Path) -> None:
         "ipod_crossfade_pcm_ring_storage_bytes",
         (2, 0xFFFFFFFF, 1),
     ) == 0
+
+    # The firmware-specific allocator path reserves from the stock heap and
+    # releases partial allocations when initialization cannot use the block.
+    emulator.heap_allocate_result = RING_STORAGE_ADDRESS
+    assert emulator.call(
+        "ipod_crossfade_pcm_ring_create",
+        (2, 2, 2),
+    ) == RING_STORAGE_ADDRESS
+    assert emulator.heap_requests[-1] == 40
+    assert emulator.call(
+        "ipod_crossfade_pcm_ring_available",
+        (RING_STORAGE_ADDRESS,),
+    ) == 0
+    emulator.call("ipod_crossfade_pcm_ring_destroy", (RING_STORAGE_ADDRESS,))
+    assert emulator.heap_releases[-1] == RING_STORAGE_ADDRESS
+
+    previous_release_count = len(emulator.heap_releases)
+    emulator.heap_allocate_result = 0
+    assert emulator.call(
+        "ipod_crossfade_pcm_ring_create",
+        (2, 2, 2),
+    ) == 0
+    assert len(emulator.heap_releases) == previous_release_count
+
+    emulator.heap_allocate_result = RING_STORAGE_ADDRESS + 1
+    assert emulator.call(
+        "ipod_crossfade_pcm_ring_create",
+        (2, 2, 2),
+    ) == 0
+    assert emulator.heap_releases[-1] == RING_STORAGE_ADDRESS + 1
+
     assert emulator.call(
         "ipod_crossfade_pcm_ring_init",
         (RING_STORAGE_ADDRESS, 39, 2, 2),
@@ -294,6 +340,7 @@ def verify(build_dir: Path, toolchain_bin: Path) -> None:
     print("PASS: one-frame fade is rejected and oversized block is clipped")
     print("PASS: PCM ring validates runtime allocation size and rejects invalid geometry")
     print("PASS: PCM ring wraps read/write cursors and reports full/empty states")
+    print("PASS: PCM ring calls the RetailOS heap API and frees unusable allocations")
 
 
 def main() -> int:
