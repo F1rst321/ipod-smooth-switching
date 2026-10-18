@@ -283,6 +283,13 @@ def main() -> int:
             uc.reg_write(UC_ARM_REG_R0, 0)
             uc.reg_write(UC_ARM_REG_PC, return_pc)
             return
+        if address == 0x10217CB8:
+            return_pc = uc.reg_read(UC_ARM_REG_LR)
+            cpsr = uc.reg_read(UC_ARM_REG_CPSR)
+            uc.reg_write(UC_ARM_REG_CPSR, (cpsr | 0x20) if return_pc & 1 else (cpsr & ~0x20))
+            uc.reg_write(UC_ARM_REG_R0, 0)
+            uc.reg_write(UC_ARM_REG_PC, return_pc)
+            return
         if address in (0x4001D000, 0x4001D050, 0x4001D0CC):
             uc.reg_write(UC_ARM_REG_R0, 0)
             uc.reg_write(UC_ARM_REG_PC, uc.reg_read(UC_ARM_REG_LR))
@@ -576,11 +583,55 @@ def main() -> int:
         machine.mem_read(callback_context_b, CALLBACK_CONTEXT_BYTES)
     )
     item_a_before_b_resume = bytes(machine.mem_read(item, ITEM_BYTES))
-    machine.mem_write(0x149EE078 + 0x44, struct.pack("<I", callback_b))
-    machine.mem_write(active_item_cell, struct.pack("<I", ITEM_B_ADDRESS + 0x44))
-    machine.mem_write(0x4000248C, struct.pack("<I", output_b))
-    machine.mem_write(0x40002510, struct.pack("<I", output_b))
-    worker_b_resume = call(0x4000AE10, (ITEM_B_ADDRESS, output_b, PCM_BYTES))
+    hook_state = mixer_symbols["ipod_crossfade_playback_hook_state"]
+    hook_fade = hook_state + 40
+    disabled_output_before = bytes(machine.mem_read(OUTPUT_ADDRESS, PCM_BYTES))
+    disabled_hook_result = call_thumb(
+        mixer_symbols["ipod_crossfade_playback_mix_hook"],
+        (0, OUTPUT_ADDRESS, PCM_BYTES // 4),
+    )
+    if disabled_hook_result != 0 or bytes(
+        machine.mem_read(OUTPUT_ADDRESS, PCM_BYTES)
+    ) != disabled_output_before:
+        raise RuntimeError("Disabled playback hook changed the stock PCM block")
+    machine.mem_write(
+        hook_state,
+        struct.pack(
+            "<10I6IB3x",
+            0x43524650, 1, ITEM_B_ADDRESS, callback_b,
+            active_item_cell, 0x149EE078 + 0x44,
+            0x4000248C, 0x40002510, output_b, 0x4000,
+            0, 0, 0, 0, 0, 0, 0,
+        ),
+    )
+    if call_thumb(
+        mixer_symbols["ipod_crossfade_begin"], (hook_fade, 3 * SAMPLE_RATE)
+    ) != 1:
+        raise RuntimeError("Playback hook fade initialization failed")
+    machine.mem_write(output_b, bytes(0x4000))
+    raw_a_before_hook = bytes(machine.mem_read(OUTPUT_ADDRESS, PCM_BYTES))
+    worker_b_resume = call_thumb(
+        mixer_symbols["ipod_crossfade_playback_mix_hook"],
+        (0, OUTPUT_ADDRESS, PCM_BYTES // 4),
+    )
+    if struct.unpack("<I", machine.mem_read(active_item_cell, 4))[0] != item + 0x44:
+        raise RuntimeError("Playback hook failed to restore the active A item")
+    if struct.unpack("<I", machine.mem_read(0x149EE078 + 0x44, 4))[0] != callback:
+        raise RuntimeError("Playback hook failed to restore the A callback")
+    if struct.unpack("<I", machine.mem_read(0x4000248C, 4))[0] != OUTPUT_ADDRESS:
+        raise RuntimeError("Playback hook failed to restore output slot 0")
+    if struct.unpack("<I", machine.mem_read(0x40002510, 4))[0] != OUTPUT_ADDRESS:
+        raise RuntimeError("Playback hook failed to restore output slot 1")
+    hook_state_words = struct.unpack(
+        "<10I6IB3x", machine.mem_read(hook_state, 68)
+    )
+    mixed_a_after_hook = bytes(machine.mem_read(OUTPUT_ADDRESS, PCM_BYTES))
+    if hook_state_words[11] != PCM_BYTES // 4:
+        raise RuntimeError(
+            f"Playback hook mixed an unexpected frame count: {hook_state_words}"
+        )
+    if mixed_a_after_hook == raw_a_before_hook:
+        raise RuntimeError("Playback hook did not mix decoded B into A's block")
     worker_b_resume_instructions = last_call_instruction_count[0]
     pcm_b_resume = bytes(machine.mem_read(output_b, PCM_BYTES))
     samples_b_resume = struct.unpack(
@@ -593,7 +644,7 @@ def main() -> int:
     if bytes(machine.mem_read(item, ITEM_BYTES)) != item_a_before_b_resume:
         raise RuntimeError("Decoding B changed A's item state after A resumed")
     if bytes(machine.mem_read(callback_context_b, CALLBACK_CONTEXT_BYTES)) == history_b_before_resume:
-        raise RuntimeError("B synthesis history did not advance after decoding A")
+        raise RuntimeError("B synthesis history did not advance in the playback hook")
     left_samples = samples[::2]
     zero_crossings = sum(
         (left_samples[index] < 0 <= left_samples[index + 1])
@@ -651,6 +702,10 @@ def main() -> int:
           f"nonzero; range {min(samples_b)}..{max(samples_b)}")
     print("  PASS: B used its cloned synthesis history; A item and history stayed intact")
     print("  PASS: A and B each resumed after one interleaved worker call")
+    print(
+        "  PASS: playback hook decoded B and mixed it before the mocked stock "
+        f"voice mixer ({hook_state_words[11]} frames; A globals restored)"
+    )
     print(f"  PASS: ARM mixer combined decoded A/B PCM for {mixed_frames} frames "
           f"inside a three-second fade ({mixer_state[1]}/{mixer_state[0]} frames done)")
     print("  Scope: instruction counts are emulator counts, not measured CPU cycles. "

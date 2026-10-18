@@ -8,7 +8,10 @@ firmware image.
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import os
+import re
 import subprocess
 from pathlib import Path
 
@@ -18,6 +21,7 @@ SOURCE = PROJECT_ROOT / "src" / "crossfade_mixer.c"
 RING_SOURCE = PROJECT_ROOT / "src" / "crossfade_pcm_ring.c"
 RESOURCE_GATE_SOURCE = PROJECT_ROOT / "src" / "crossfade_resource_gate.c"
 RESOURCE_GATE_ASSEMBLY = PROJECT_ROOT / "src" / "crossfade_resource_gate.S"
+PLAYBACK_HOOK_SOURCE = PROJECT_ROOT / "src" / "crossfade_playback_hook.c"
 LINKER_SCRIPT = PROJECT_ROOT / "src" / "crossfade_mixer.lds"
 DEFAULT_TOOLCHAIN = (
     PROJECT_ROOT / "build" / "toolchains" / "arm-gnu-14.3" / "unpacked" / "bin"
@@ -58,6 +62,12 @@ def main() -> int:
         default=PROJECT_ROOT / "build" / "crossfade-mixer",
         help="local ignored build output directory",
     )
+    parser.add_argument(
+        "--load-address",
+        type=lambda value: int(value, 0),
+        default=0x10712000,
+        help="absolute OSOS runtime address for this payload",
+    )
     args = parser.parse_args()
 
     toolchain = args.toolchain_bin.resolve()
@@ -76,12 +86,15 @@ def main() -> int:
     missing = [str(path) for path in required if not path.is_file()]
     if missing:
         parser.error("missing cross-toolchain tools: " + ", ".join(missing))
+    if not 0x10712000 <= args.load_address < 0x107161A4 or args.load_address & 3:
+        parser.error("load address must be aligned inside the audited OSOS zero window")
 
     output_dir.mkdir(parents=True, exist_ok=True)
     obj = output_dir / "crossfade_mixer.o"
     ring_obj = output_dir / "crossfade_pcm_ring.o"
     resource_gate_obj = output_dir / "crossfade_resource_gate.o"
     resource_gate_asm_obj = output_dir / "crossfade_resource_gate_asm.o"
+    playback_hook_obj = output_dir / "crossfade_playback_hook.o"
     elf = output_dir / "crossfade_mixer.elf"
     binary = output_dir / "crossfade_mixer.bin"
     map_file = output_dir / "crossfade_mixer.map"
@@ -136,6 +149,20 @@ def main() -> int:
         run(
             [
                 str(gcc),
+                *flags,
+                "-I",
+                str(PLAYBACK_HOOK_SOURCE.parent),
+                "-c",
+                str(PLAYBACK_HOOK_SOURCE),
+                "-o",
+                str(playback_hook_obj),
+            ],
+            output_dir,
+            log,
+        )
+        run(
+            [
+                str(gcc),
                 "-mcpu=arm7tdmi",
                 "-mthumb-interwork",
                 "-c",
@@ -168,12 +195,14 @@ def main() -> int:
                 "-mthumb",
                 "-nostdlib",
                 "-Wl,--gc-sections",
+                f"-Wl,--defsym=IPOD_CROSSFADE_CODE_BASE=0x{args.load_address:08x}",
                 f"-Wl,-T,{LINKER_SCRIPT}",
                 f"-Wl,-Map,{map_file}",
                 str(obj),
                 str(ring_obj),
                 str(resource_gate_obj),
                 str(resource_gate_asm_obj),
+                str(playback_hook_obj),
                 "-lgcc",
                 "-o",
                 str(elf),
@@ -199,10 +228,29 @@ def main() -> int:
         parser.error(str(exc))
 
     (output_dir / "build.log").write_text("\n".join(log), encoding="utf-8")
+    nm_output = run([str(nm), "-n", str(elf)], output_dir, log)
+    symbol_pattern = re.compile(r"^([0-9a-fA-F]+)\s+[A-Za-z]\s+(ipod_crossfade_\w+)$")
+    symbols: dict[str, int] = {}
+    for line in nm_output.splitlines():
+        match = symbol_pattern.match(line)
+        if match:
+            symbols[match.group(2)] = int(match.group(1), 16)
+    manifest = {
+        "artifact_type": "experimental_retailos_audio_hook_payload",
+        "payload_address": args.load_address,
+        "payload_size": payload_size,
+        "payload_sha256": hashlib.sha256(binary.read_bytes()).hexdigest(),
+        "symbols": symbols,
+        "runtime_validated": False,
+        "device_ready": False,
+    }
+    binary.with_suffix(binary.suffix + ".json").write_text(
+        json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
+    )
     print(f"Compiler: {version}")
     print(f"Target: ARM7TDMI / ARMv4T Thumb")
     print(f"Payload: {binary} ({payload_size:,}/{OSOS_WINDOW_BYTES:,} bytes)")
-    print("Offline mixer, PCM ring, and resource-open gate; no decoder hook or installable image was built.")
+    print("Offline mixer, PCM ring, resource-open gate and experimental playback hook; no device image was built.")
     return 0
 
 

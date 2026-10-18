@@ -2,8 +2,9 @@
 """Build an offline RetailOS Settings-hook candidate without touching a device.
 
 The candidate combines the 19-row resource prototype with the compiled
-0x6089 Settings getter/setter. It remains experimental: it does not add an
-audio mixer hook or establish that the static window is safe at runtime.
+0x6089 Settings getter/setter and may include an optional experimental audio
+hook payload. It remains experimental and does not establish that the static
+window is safe at runtime.
 """
 from __future__ import annotations
 
@@ -33,6 +34,10 @@ SET_FAILURE_TARGET = 0x101927E4
 HANDLER_START = 0x10714000
 HANDLER_END = OSOS_LOAD_ADDRESS + RESOURCE_WINDOW_END
 HANDLER_FILE_OFFSET = HANDLER_START - OSOS_LOAD_ADDRESS
+AUDIO_HOOK_START = 0x10714200
+AUDIO_HOOK_SITE_OFFSET = 0x1D606C
+AUDIO_HOOK_STOCK_BRANCH = 0xEB010711
+AUDIO_HOOK_STOCK_TARGET = 0x10217CB8
 
 
 def arm_branch(instruction_address: int, target_address: int) -> int:
@@ -47,13 +52,24 @@ def arm_branch(instruction_address: int, target_address: int) -> int:
 
 
 def branch_target(instruction_address: int, instruction: int) -> int:
-    """Decode an unconditional ARM B instruction target."""
-    if instruction >> 28 != 0xE or instruction & 0x0F000000 != 0x0A000000:
-        raise ValueError(f"0x{instruction:08x} is not an unconditional ARM B")
+    """Decode an unconditional ARM B or BL instruction target."""
+    if instruction >> 28 != 0xE or instruction & 0x0E000000 != 0x0A000000:
+        raise ValueError(f"0x{instruction:08x} is not an unconditional ARM B/BL")
     immediate = instruction & 0x00FFFFFF
     if immediate & 0x00800000:
         immediate -= 1 << 24
     return instruction_address + 8 + immediate * 4
+
+
+def arm_link_branch(instruction_address: int, target_address: int) -> int:
+    """Encode an unconditional ARM BL instruction."""
+    delta = target_address - (instruction_address + 8)
+    if delta & 3:
+        raise ValueError("ARM BL target must be word-aligned")
+    displacement = delta // 4
+    if not -(1 << 23) <= displacement < (1 << 23):
+        raise ValueError("ARM BL target is outside the +/-32 MiB range")
+    return 0xEB000000 | (displacement & 0x00FFFFFF)
 
 
 def require_payload(payload_path: Path, manifest_path: Path) -> tuple[bytes, dict[str, object]]:
@@ -81,7 +97,49 @@ def require_payload(payload_path: Path, manifest_path: Path) -> tuple[bytes, dic
     return payload, manifest
 
 
-def build_candidate(stock_osos: bytes, payload: bytes) -> tuple[bytes, dict[str, object]]:
+def require_audio_payload(
+    payload_path: Path, manifest_path: Path
+) -> tuple[bytes, dict[str, object]]:
+    payload = payload_path.read_bytes()
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if manifest.get("artifact_type") != "experimental_retailos_audio_hook_payload":
+        raise ValueError("audio payload manifest has an unexpected artifact type")
+    if manifest.get("payload_address") != AUDIO_HOOK_START:
+        raise ValueError("audio hook payload must be linked at 0x10714200")
+    if manifest.get("payload_size") != len(payload):
+        raise ValueError("audio payload size does not match its manifest")
+    if manifest.get("payload_sha256") != sha256(payload):
+        raise ValueError("audio payload SHA-256 does not match its manifest")
+    if manifest.get("runtime_validated") is not False or manifest.get("device_ready") is not False:
+        raise ValueError("audio payload manifest incorrectly claims device validation")
+    symbols = manifest.get("symbols")
+    if not isinstance(symbols, dict):
+        raise ValueError("audio payload manifest is missing its symbol table")
+    gate = symbols.get("ipod_crossfade_playback_mix_gate")
+    if not isinstance(gate, int) or gate & 3:
+        raise ValueError("audio payload has no aligned ARM playback gate")
+    if gate < AUDIO_HOOK_START or gate >= AUDIO_HOOK_START + len(payload):
+        raise ValueError("audio playback gate is outside the payload")
+    if not payload or AUDIO_HOOK_START + len(payload) > OSOS_LOAD_ADDRESS + RESOURCE_WINDOW_END:
+        raise ValueError("audio payload exceeds the audited OSOS zero window")
+    state_address = symbols.get("ipod_crossfade_playback_hook_state")
+    if not isinstance(state_address, int):
+        raise ValueError("audio payload has no playback-hook state symbol")
+    state_offset = state_address - AUDIO_HOOK_START
+    if state_offset < 0 or state_offset + 8 > len(payload):
+        raise ValueError("playback-hook state is outside the audio payload")
+    state_magic, state_enabled = struct.unpack_from("<II", payload, state_offset)
+    if state_magic != 0x43524650 or state_enabled != 0:
+        raise ValueError("playback hook must have its expected magic and default disabled state")
+    return payload, manifest
+
+
+def build_candidate(
+    stock_osos: bytes,
+    payload: bytes,
+    audio_payload: bytes | None = None,
+    audio_manifest: dict[str, object] | None = None,
+) -> tuple[bytes, dict[str, object]]:
     if len(stock_osos) != EXPECTED_OSOS_SIZE or sha256(stock_osos) != EXPECTED_OSOS_SHA256:
         raise ValueError("input OSOS does not match the pinned original")
     ui_candidate, ui_manifest = build_prototype(stock_osos)
@@ -116,12 +174,44 @@ def build_candidate(stock_osos: bytes, payload: bytes) -> tuple[bytes, dict[str,
     struct.pack_into("<I", candidate, GET_BRANCH_OFFSET, get_hook)
     struct.pack_into("<I", candidate, SET_BRANCH_OFFSET, set_hook)
 
-    # Every change to the stock OSOS must be accounted for by the resource
-    # prototype, the code payload, or these two audited dispatch instructions.
+    audio_hook_word: int | None = None
+    audio_gate: int | None = None
+    if audio_payload is not None:
+        if audio_manifest is None:
+            raise ValueError("audio payload manifest is required")
+        audio_symbols = audio_manifest.get("symbols")
+        if not isinstance(audio_symbols, dict):
+            raise ValueError("audio payload manifest is missing its symbols")
+        audio_gate = int(audio_symbols["ipod_crossfade_playback_mix_gate"])
+        audio_file_offset = AUDIO_HOOK_START - OSOS_LOAD_ADDRESS
+        if resource_used_end > HANDLER_FILE_OFFSET:
+            raise ValueError("UI resource region overlaps Settings handler placement")
+        if audio_file_offset < HANDLER_FILE_OFFSET + len(payload):
+            raise ValueError("audio payload overlaps the Settings handler")
+        if any(stock_osos[audio_file_offset:audio_file_offset + len(audio_payload)]):
+            raise ValueError("audio payload placement range is not zero in stock OSOS")
+        stock_audio_word = struct.unpack_from("<I", stock_osos, AUDIO_HOOK_SITE_OFFSET)[0]
+        if stock_audio_word != AUDIO_HOOK_STOCK_BRANCH:
+            raise ValueError(
+                f"unexpected stock voice-mixer call at OSOS+0x{AUDIO_HOOK_SITE_OFFSET:x}"
+            )
+        audio_site = OSOS_LOAD_ADDRESS + AUDIO_HOOK_SITE_OFFSET
+        if branch_target(audio_site, stock_audio_word) != AUDIO_HOOK_STOCK_TARGET:
+            raise ValueError("stock voice-mixer call no longer has the audited target")
+        audio_hook_word = arm_link_branch(audio_site, audio_gate)
+        candidate[audio_file_offset:audio_file_offset + len(audio_payload)] = audio_payload
+        struct.pack_into("<I", candidate, AUDIO_HOOK_SITE_OFFSET, audio_hook_word)
+
+    # Account for every changed OSOS byte in the resource prototype or one of
+    # the explicitly placed payloads and audited dispatch instructions.
     expected = bytearray(ui_candidate)
     expected[HANDLER_FILE_OFFSET:HANDLER_FILE_OFFSET + len(payload)] = payload
     struct.pack_into("<I", expected, GET_BRANCH_OFFSET, get_hook)
     struct.pack_into("<I", expected, SET_BRANCH_OFFSET, set_hook)
+    if audio_payload is not None and audio_hook_word is not None:
+        audio_file_offset = AUDIO_HOOK_START - OSOS_LOAD_ADDRESS
+        expected[audio_file_offset:audio_file_offset + len(audio_payload)] = audio_payload
+        struct.pack_into("<I", expected, AUDIO_HOOK_SITE_OFFSET, audio_hook_word)
     if candidate != expected or len(candidate) != EXPECTED_OSOS_SIZE:
         raise ValueError("candidate differs outside explicitly permitted OSOS patches")
 
@@ -135,12 +225,19 @@ def build_candidate(stock_osos: bytes, payload: bytes) -> tuple[bytes, dict[str,
         raise ValueError("setter branch does not reach its handler")
     if candidate[HANDLER_FILE_OFFSET:HANDLER_FILE_OFFSET + len(payload)] != payload:
         raise ValueError("handler code bytes differ from the compiled payload")
+    if audio_payload is not None and audio_hook_word is not None:
+        audio_file_offset = AUDIO_HOOK_START - OSOS_LOAD_ADDRESS
+        if candidate[audio_file_offset:audio_file_offset + len(audio_payload)] != audio_payload:
+            raise ValueError("audio hook code bytes differ from the compiled payload")
+        if branch_target(OSOS_LOAD_ADDRESS + AUDIO_HOOK_SITE_OFFSET, audio_hook_word) != audio_gate:
+            raise ValueError("playback hook BL does not reach its ARM gate")
 
     manifest: dict[str, object] = {
         "artifact_type": "experimental_offline_retailos_osos_candidate",
         "device_ready": False,
         "runtime_validated": False,
         "audio_path_connected": False,
+        "playback_hook_installed": audio_payload is not None,
         "stock_osos_sha256": EXPECTED_OSOS_SHA256,
         "candidate_osos_sha256": sha256(bytes(candidate)),
         "osos_size": len(candidate),
@@ -170,16 +267,30 @@ def build_candidate(stock_osos: bytes, payload: bytes) -> tuple[bytes, dict[str,
             "dispatch_targets": "ARM branch target checks passed",
             "settings_handler_emulation": "not run by this builder",
             "target_device": "not tested",
-            "audio_mixing": "not connected",
+            "audio_mixing": "helper included but runtime setup not connected",
         },
         "limitations": [
             "The static zero window is not proven free at runtime.",
             "The Volume Limit View is reused as a UI hypothesis; wheel behavior is unverified.",
             "The Settings property handlers have not been emulated in this build step.",
-            "No second decoder, crossfade mixer callback, or track handoff is installed.",
+            "The optional playback helper branch and its default-off data need device validation.",
+            "No next-track resource/item lifecycle or automatic fade trigger is installed.",
             "This OSOS is not an installable or verified firmware image.",
         ],
     }
+    if audio_payload is not None and audio_hook_word is not None and audio_gate is not None:
+        manifest["audio_hook_payload"] = {
+            "address": AUDIO_HOOK_START,
+            "file_offset": AUDIO_HOOK_START - OSOS_LOAD_ADDRESS,
+            "size": len(audio_payload),
+            "sha256": sha256(audio_payload),
+        }
+        manifest["patched_dispatch_branches"]["playback_mix"] = {
+            "file_offset": AUDIO_HOOK_SITE_OFFSET,
+            "branch_word": f"0x{audio_hook_word:08x}",
+            "target": f"0x{audio_gate:08x}",
+            "stock_target": f"0x{AUDIO_HOOK_STOCK_TARGET:08x}",
+        }
     return bytes(candidate), manifest
 
 
@@ -206,14 +317,39 @@ def main() -> int:
         "--manifest", type=Path,
         help="payload manifest; defaults to PAYLOAD.bin.json",
     )
+    parser.add_argument(
+        "--audio-payload",
+        type=Path,
+        help="optional experimental mixer/worker-hook payload linked at 0x10714200",
+    )
+    parser.add_argument(
+        "--audio-manifest",
+        type=Path,
+        help="audio manifest; defaults to AUDIO_PAYLOAD.bin.json",
+    )
     parser.add_argument("--output", type=Path, required=True,
                         help="new experimental OSOS output directly under build/")
     args = parser.parse_args()
     manifest_path = args.manifest or args.payload.with_suffix(args.payload.suffix + ".json")
+    audio_manifest_path = (
+        args.audio_manifest
+        or (args.audio_payload.with_suffix(args.audio_payload.suffix + ".json")
+            if args.audio_payload is not None else None)
+    )
+    if args.audio_manifest is not None and args.audio_payload is None:
+        parser.error("--audio-manifest requires --audio-payload")
     try:
         target = output_in_build(args.output)
         payload, _payload_manifest = require_payload(args.payload, manifest_path)
-        candidate, manifest = build_candidate(args.osos.read_bytes(), payload)
+        audio_payload = None
+        audio_payload_manifest = None
+        if args.audio_payload is not None and audio_manifest_path is not None:
+            audio_payload, audio_payload_manifest = require_audio_payload(
+                args.audio_payload, audio_manifest_path
+            )
+        candidate, manifest = build_candidate(
+            args.osos.read_bytes(), payload, audio_payload, audio_payload_manifest
+        )
         output_manifest = target.with_suffix(target.suffix + ".json")
         with target.open("xb") as stream:
             stream.write(candidate)
@@ -232,6 +368,12 @@ def main() -> int:
     print(f"SHA-256: {manifest['candidate_osos_sha256']}")
     print(f"Resource data: {manifest['resource_window']['bytes_used']:,} bytes")
     print(f"Settings handlers: {len(payload):,} bytes at OSOS+0x{HANDLER_FILE_OFFSET:06x}")
+    if audio_payload is not None:
+        print(
+            f"Experimental playback helper: {len(audio_payload):,} bytes at "
+            f"OSOS+0x{AUDIO_HOOK_START - OSOS_LOAD_ADDRESS:06x}; "
+            "B item lifecycle is not initialized by this candidate."
+        )
     print("Offline research artifact only: audio path and target hardware are unvalidated.")
     return 0
 

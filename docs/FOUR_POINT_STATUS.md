@@ -895,3 +895,24 @@ overlay-байты из исходного OSOS и исполняет насто
 frame parser, sync callback или PCM output. Следующий шаг — создать внешний B
 item с отдельным file/resource stream, затем проверить serial decode и получить
 PCM B до voice mixer; установленного образа всё ещё нет.
+
+### Проверка полного B worker перед штатным voice mixer — 18 октября 2026 года
+
+Добавлен экспериментальный `ipod_crossfade_playback_mix_hook`: при готовом
+выходе A он переключает active item, callback и output cells на B, вызывает
+полный MP3 worker, затем возвращает указатели и смешивает PCM перед штатным
+voice mixer. `verify_stock_mp3_pcm.py` подтвердил один B-блок, раздельные
+item/history, восстановление A-глобалов и 1 152 смешанных кадра. В эмуляции
+штатный voice mixer подменён заглушкой, как и file I/O и очередь.
+
+Settings partition-кандидат пока не содержит этой ветки вызова. Проверка
+закрывает эмуляционный стык «worker B → PCM mix → voice-mixer call», но не
+создание следующего track resource/item, безопасное открытие B, runtime
+ownership code cave, Click Wheel/persistence или проверку на устройстве.
+
+После этого helper был включён в отдельный offline OSOS/partition прототип.
+`build_crossfade_osos_candidate.py` проверил ARM `BL` от `OSOS+0x1d606c` к gate
+`0x10714254`, сохранность остальных участков OSOS и размещение 1 928 байт
+payload в пределах статического окна; полный partition прошёл structural
+verify. Конфигурация helper-а в образе выключена и не создаёт B item, поэтому
+это подтверждает сборку и переход к helper-у, но не воспроизведение кроссфейда.

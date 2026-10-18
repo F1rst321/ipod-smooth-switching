@@ -4,9 +4,12 @@ ENTRY(ipod_crossfade_begin)
 
 SECTIONS
 {
-    . = 0x10712000;
+    IPOD_CROSSFADE_CODE_BASE = DEFINED(IPOD_CROSSFADE_CODE_BASE) ? IPOD_CROSSFADE_CODE_BASE : 0x10712000;
+    . = IPOD_CROSSFADE_CODE_BASE;
     .text : ALIGN(4) {
         KEEP(*(.text.ipod_crossfade_resource_registry_reset_gate))
+        KEEP(*(.text.ipod_crossfade_playback_mix_gate))
+        KEEP(*(.text.ipod_crossfade_playback_mix_hook))
         KEEP(*(.text.ipod_crossfade_open_track_resource_b))
         KEEP(*(.text.ipod_crossfade_begin))
         KEEP(*(.text.ipod_crossfade_mix_block))
@@ -22,7 +25,11 @@ SECTIONS
         *(.ARM.extab* .gnu.linkonce.armextab.*)
         *(.ARM.exidx* .gnu.linkonce.armexidx.*)
     }
-    .data : ALIGN(4) { *(.data.ipod_crossfade_resource_gate_state) *(.data .data.*) }
+    .data : ALIGN(4) {
+        KEEP(*(.data.ipod_crossfade_resource_gate_state))
+        KEEP(*(.data.ipod_crossfade_playback_hook_state))
+        *(.data .data.*)
+    }
     .bss (NOLOAD) : ALIGN(4) {
         *(.bss .bss.*)
         *(COMMON)

@@ -62,6 +62,34 @@ are not committed to GitHub. The original backup in the project and the copy
 on `D:\` still match SHA-256
 `010bda520671d86a5a2cb010b57ee4484c980e54d97eb3e12621e08cde0423a3`.
 
+## Composite offline candidate with the playback hook
+
+On 2026-10-18 a separate ignored build combined the same Settings prototype
+with the experimental worker-B helper and an ARM `BL` patch at
+`OSOS+0x1d606c`, before the stock voice mixer. The helper is linked at
+`0x10714200`; its static configuration starts disabled, so this image does not
+start a second track by itself. The OSOS SHA-256 is
+`482543c9e0a6a9acfa934d5718309872d87713ef7c259017882efacec0b10a3d`; the
+structurally checked partition SHA-256 is
+`825aabf22c3f7aa73bbfc7337a60adb8eb19faad1303212e90d1e6e8d2dda343`.
+The image is under ignored `build/` and is a research artifact, not a release.
+
+Rebuild the optional audio payload and combined OSOS with:
+
+```powershell
+py .\tools\build_crossfade_mixer.py --load-address 0x10714200 --output-dir .\build\crossfade-audio-hook
+py .\tools\build_crossfade_osos_candidate.py `
+  .\firmware\extracted\audio-analysis\osos.bin `
+  .\build\settings-hooks\crossfade_settings.bin `
+  --audio-payload .\build\crossfade-audio-hook\crossfade_mixer.bin `
+  --output .\build\crossfade-settings-audio-hook-prototype-osos.bin
+```
+
+The branch target, embedded payload bytes, resource table, image directory, and
+OSOS checksum were checked offline. The next-track item/resource lifecycle,
+Settings-to-fade control, boot, UI, persistence, and audio on the physical iPod
+are still unverified; do not install this candidate.
+
 ## Work still required before a device-ready release
 
 1. Establish the actual Settings-row and Click Wheel event path. The existing

@@ -42,3 +42,19 @@ ipod_crossfade_resource_registry_reset_gate:
     .word 0x101332a8
 
 .size ipod_crossfade_resource_registry_reset_gate, .-ipod_crossfade_resource_registry_reset_gate
+
+.section .text.ipod_crossfade_playback_mix_gate, "ax", %progbits
+.align 2
+.global ipod_crossfade_playback_mix_gate
+.type ipod_crossfade_playback_mix_gate, %function
+
+/* Preserve the caller's ARM LR while entering the Thumb helper. */
+ipod_crossfade_playback_mix_gate:
+    ldr     r12, .Lplayback_helper
+    bx      r12
+
+.align 2
+.Lplayback_helper:
+    .word ipod_crossfade_playback_mix_hook
+
+.size ipod_crossfade_playback_mix_gate, .-ipod_crossfade_playback_mix_gate
